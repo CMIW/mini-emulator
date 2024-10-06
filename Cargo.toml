@@ -1,0 +1,12 @@
+[package]
+name = "proyecto-1"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+iced = { version = "0.13.1", features = ["tokio", "advanced"] }
+iced_aw = { version = "0.10.0", features = ["menu"] }
+rfd = "0.15.0"
+serde_json = "1.0.128"
+thiserror = "1.0.64"
+tokio = { version = "1.37.0", features = ["fs"] }
