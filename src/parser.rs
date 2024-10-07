@@ -1,5 +1,5 @@
+use crate::emulator::{Instruction, Operation};
 use crate::error::Error;
-use crate::emulator::{Operation, Instruction};
 use std::str::FromStr;
 
 const REGISTERS: [&str; 4] = ["AX", "BX", "CX", "DX"];
@@ -34,15 +34,14 @@ pub fn read_file(stream: &[u8]) -> Result<Vec<Instruction>, Error> {
 
             // Validate the number of operators
             validate_operators(i, &operation, &instruction)?;
+            //let mapped: Vec<String> = instruction.into_iter().map(|s| s.to_string()).collect();
+            //let arr: [String; 3] = mapped.clone().try_into().map_err(|_| Error::InvalidNumberOperands(i, operation, mapped))?;
 
-            instructions.push(
-                Instruction {
-                    operation,
-                    operands: instruction.iter().map(|s| s.to_string()).collect(),
-                }
-            );
+            instructions.push(Instruction {
+                operation,
+                operands: instruction.into_iter().map(|s| s.to_string()).collect(),
+            });
         }
-
     }
 
     Ok(instructions)
@@ -52,7 +51,11 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
     match operation {
         Operation::PARAM => {
             if operators.len() != 3 {
-                return Err(Error::InvalidNumberOperands(row, *operation, operators.iter().map(|s| s.to_string()).collect()));
+                return Err(Error::InvalidNumberOperands(
+                    row,
+                    *operation,
+                    operators.iter().map(|s| s.to_string()).collect(),
+                ));
             } else {
                 for param in operators {
                     if REGISTERS.contains(param) {
@@ -60,18 +63,29 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
                     }
                 }
             }
-        },
+        }
         Operation::MOV => {
             if operators.len() != 2 {
-                return Err(Error::InvalidNumberOperands(row, *operation, operators.iter().map(|s| s.to_string()).collect()));
+                return Err(Error::InvalidNumberOperands(
+                    row,
+                    *operation,
+                    operators.iter().map(|s| s.to_string()).collect(),
+                ));
             } else if !REGISTERS.contains(&operators[0]) {
-                return Err(Error::InvalidOperand(row, *operation, operators[0].to_string()));
+                return Err(Error::InvalidOperand(
+                    row,
+                    *operation,
+                    operators[0].to_string(),
+                ));
             }
-        },
-        Operation::SWAP |
-        Operation::CMP => {
+        }
+        Operation::SWAP | Operation::CMP => {
             if operators.len() != 2 {
-                return Err(Error::InvalidNumberOperands(row, *operation, operators.iter().map(|s| s.to_string()).collect()));
+                return Err(Error::InvalidNumberOperands(
+                    row,
+                    *operation,
+                    operators.iter().map(|s| s.to_string()).collect(),
+                ));
             } else {
                 for operator in operators {
                     if !REGISTERS.contains(operator) {
@@ -79,37 +93,60 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
                     }
                 }
             }
-        },
-        Operation::ADD |
-        Operation::SUB |
-        Operation::LOAD |
-        Operation::STORE |
-        Operation::JMP |
-        Operation::JE |
-        Operation::JNE |
-        Operation::PUSH |
-        Operation::POP => {
+        }
+        Operation::ADD
+        | Operation::SUB
+        | Operation::LOAD
+        | Operation::STORE
+        | Operation::JMP
+        | Operation::JE
+        | Operation::JNE
+        | Operation::PUSH
+        | Operation::POP => {
             if operators.len() != 1 {
-                return Err(Error::InvalidNumberOperands(row, *operation, operators.iter().map(|s| s.to_string()).collect()));
+                return Err(Error::InvalidNumberOperands(
+                    row,
+                    *operation,
+                    operators.iter().map(|s| s.to_string()).collect(),
+                ));
             } else if !REGISTERS.contains(&operators[0]) {
-                return Err(Error::InvalidOperand(row, *operation, operators[0].to_string()));
+                return Err(Error::InvalidOperand(
+                    row,
+                    *operation,
+                    operators[0].to_string(),
+                ));
             }
-        },
+        }
         Operation::INT => {
             if operators.len() != 1 {
-                return Err(Error::InvalidNumberOperands(row, *operation, operators.iter().map(|s| s.to_string()).collect()));
+                return Err(Error::InvalidNumberOperands(
+                    row,
+                    *operation,
+                    operators.iter().map(|s| s.to_string()).collect(),
+                ));
             } else if !INTERUPTS.contains(&operators[0]) {
-                return Err(Error::InvalidOperand(row, *operation, operators[0].to_string()));
+                return Err(Error::InvalidOperand(
+                    row,
+                    *operation,
+                    operators[0].to_string(),
+                ));
             }
-        },
-        Operation::INC |
-        Operation::DEC => {
+        }
+        Operation::INC | Operation::DEC => {
             if operators.len() > 1 {
-                return Err(Error::InvalidNumberOperands(row, *operation, operators.iter().map(|s| s.to_string()).collect()));
+                return Err(Error::InvalidNumberOperands(
+                    row,
+                    *operation,
+                    operators.iter().map(|s| s.to_string()).collect(),
+                ));
             } else if operators.len() == 1 && !REGISTERS.contains(&operators[0]) {
-                return Err(Error::InvalidOperand(row, *operation, operators[0].to_string()));
+                return Err(Error::InvalidOperand(
+                    row,
+                    *operation,
+                    operators[0].to_string(),
+                ));
             }
-        },
+        }
     }
 
     Ok(())

@@ -1,6 +1,6 @@
+use crate::emulator::Operation;
 use std::io;
 use thiserror::Error;
-use crate::emulator::Operation;
 
 #[derive(Error, Debug, Clone)]
 pub enum Error {
