@@ -1,7 +1,8 @@
-use std::str::FromStr;
 use crate::error::Error;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Operation {
     PARAM,
     MOV,
@@ -47,8 +48,58 @@ impl FromStr for Operation {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Instruction {
     pub operation: Operation,
     pub operands: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_deserialize_operation() {
+        let operation = Operation::MOV;
+
+        let serialize = bincode::serialize(&operation).unwrap();
+
+        let deserialize = bincode::deserialize(&serialize).unwrap();
+
+        assert_eq!(operation, deserialize);
+    }
+
+    #[test]
+    fn serialize_deserialize_instruction() {
+        let instruction = Instruction {
+            operation: Operation::MOV,
+            operands: vec!["AX".to_string(), "5".to_string()],
+        };
+
+        let serialize = bincode::serialize(&instruction).unwrap();
+
+        let deserialize = bincode::deserialize(&serialize).unwrap();
+
+        assert_eq!(instruction, deserialize);
+    }
+
+    #[test]
+    fn serialize_deserialize_instructions() {
+        let instructions = vec![
+            Instruction {
+                operation: Operation::MOV,
+                operands: vec!["AX".to_string(), "5".to_string()],
+            },
+            Instruction {
+                operation: Operation::MOV,
+                operands: vec!["AX".to_string(), "5".to_string()],
+            },
+        ];
+
+        let serialize = bincode::serialize(&instructions).unwrap();
+
+        let deserialize: Vec<Instruction> = bincode::deserialize(&serialize).unwrap();
+
+        assert_eq!(instructions, deserialize);
+    }
 }
