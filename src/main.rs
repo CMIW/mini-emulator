@@ -1,12 +1,15 @@
+use std::env;
 use iced::font;
-use iced::widget::{button, column, container, row, scrollable, text};
-use iced::widget::{rich_text, span};
+use std::fs::File;
+use std::io::BufReader;
+use std::path::PathBuf;
 use iced::{color, Font};
 use iced::{widget, Task};
-use std::path::PathBuf;
+use iced::widget::{rich_text, span};
+use iced::widget::{button, column, container, row, scrollable};
 
 use proyecto_1::parser::*;
-use proyecto_1::{emulator::Storage, error::Error};
+use proyecto_1::{config::Config, emulator::Storage, error::Error};
 
 fn main() -> iced::Result {
     iced::application("Emulator", Emulator::update, Emulator::view).run_with(Emulator::new)
@@ -15,6 +18,7 @@ fn main() -> iced::Result {
 #[derive(Default)]
 struct Emulator {
     storage: Storage,
+    config: Config,
 }
 
 #[derive(Debug, Clone)]
@@ -27,9 +31,29 @@ enum Message {
 
 impl Emulator {
     fn new() -> (Self, Task<Message>) {
+        // Read the config file, if no file is found create a defualt config
+        let config: Config = match env::current_dir() {
+            Ok(mut path) => {
+                path.push("config.json");
+                match File::open(path) {
+                    Ok(file) => {
+                        let reader = BufReader::new(file);
+                        let config: Config = match serde_json::from_reader(reader) {
+                            Ok(config) => config,
+                            Err(_) => Config::default(),
+                        };
+                        config
+                    },
+                    Err(_) => Config::default(),
+                }
+            },
+            Err(_) => Config::default(),
+        };
+
         (
             Self {
-                storage: Storage::new(525),
+                config,
+                storage: Storage::new(config.storage),
             },
             Task::none(),
         )
@@ -51,7 +75,9 @@ impl Emulator {
             }
             Message::StoreFiles(Ok(files)) => {
                 for (file_name, data) in files {
-                    println!("{:?}", read_file(&data));
+                    //let instructions = read_file(&data).unwrap();
+                    //let serialized = bincode::serialize(&instructions).unwrap();
+                    //println!("{:?} {} {}", &serialized, &serialized.len(), &data.len());
                     let result = self.storage.store_files(&file_name, data.len(), data);
                     if let Err(error) = result {
                         let dialog = rfd::AsyncMessageDialog::new()

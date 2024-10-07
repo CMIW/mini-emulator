@@ -34,8 +34,6 @@ pub fn read_file(stream: &[u8]) -> Result<Vec<Instruction>, Error> {
 
             // Validate the number of operators
             validate_operators(i, &operation, &instruction)?;
-            //let mapped: Vec<String> = instruction.into_iter().map(|s| s.to_string()).collect();
-            //let arr: [String; 3] = mapped.clone().try_into().map_err(|_| Error::InvalidNumberOperands(i, operation, mapped))?;
 
             instructions.push(Instruction {
                 operation,
