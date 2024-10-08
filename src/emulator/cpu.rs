@@ -1,3 +1,5 @@
+use crate::emulator::Operation;
+
 #[derive(Debug, Default)]
 pub struct CPU {
     pub ax: u64,
@@ -7,6 +9,7 @@ pub struct CPU {
     pub ac: u64,
     pub pc: u64,
     pub sp: u64,
+    pub ir: Option<Operation>,
     pub z: bool,
 }
 

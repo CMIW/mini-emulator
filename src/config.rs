@@ -1,5 +1,5 @@
-use std::default::Default;
 use serde::{Deserialize, Serialize};
+use std::default::Default;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct Config {
