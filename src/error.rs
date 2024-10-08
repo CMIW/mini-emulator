@@ -13,7 +13,11 @@ pub enum Error {
     #[error("The given path does not contain a file name.")]
     NotFile,
     #[error("Not enough space in memory, {0} won't be stored.")]
-    NotEnoughMemory(String),
+    NotEnoughStorage(String),
+    #[error("Not enough space in user memory.")]
+    NotEnoughUserMemory,
+    #[error("Not enough space in OS memory.")]
+    NotEnoughOsMemory,
     #[error("File should contain valid utf8")]
     Utf8Error,
     #[error("Invalid Operation {1} on line {0},")]

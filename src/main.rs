@@ -1,12 +1,12 @@
-use std::env;
 use iced::font;
+use iced::widget::{button, column, container, row, scrollable};
+use iced::widget::{rich_text, span};
+use iced::{color, Font};
+use iced::{widget, Task};
+use std::env;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
-use iced::{color, Font};
-use iced::{widget, Task};
-use iced::widget::{rich_text, span};
-use iced::widget::{button, column, container, row, scrollable};
 
 use proyecto_1::parser::*;
 use proyecto_1::{config::Config, emulator::Storage, error::Error};
@@ -31,7 +31,7 @@ enum Message {
 
 impl Emulator {
     fn new() -> (Self, Task<Message>) {
-        // Read the config file, if no file is found create a defualt config
+        // Read the config file, if no file is found in the proyect root create a defualt config
         let config: Config = match env::current_dir() {
             Ok(mut path) => {
                 path.push("config.json");
@@ -43,10 +43,10 @@ impl Emulator {
                             Err(_) => Config::default(),
                         };
                         config
-                    },
+                    }
                     Err(_) => Config::default(),
                 }
-            },
+            }
             Err(_) => Config::default(),
         };
 

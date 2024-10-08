@@ -32,7 +32,7 @@ impl Storage {
                 self.data[0..size].copy_from_slice(&data[..]);
                 self.used.push((file_name.to_string(), 0, size));
             } else {
-                return Err(Error::NotEnoughMemory(file_name.to_string()));
+                return Err(Error::NotEnoughStorage(file_name.to_string()));
             }
         } else {
             // last used memory information
@@ -45,7 +45,7 @@ impl Storage {
                 self.data[next_address..next_address + size].copy_from_slice(&data[..]);
                 self.used.push((file_name.to_string(), next_address, size));
             } else {
-                return Err(Error::NotEnoughMemory(file_name.to_string()));
+                return Err(Error::NotEnoughStorage(file_name.to_string()));
             }
         }
 
