@@ -18,7 +18,6 @@ fn main() -> iced::Result {
 #[derive(Default)]
 struct Emulator {
     storage: Storage,
-    config: Config,
     memory: Memory,
 }
 
@@ -54,7 +53,6 @@ impl Emulator {
 
         (
             Self {
-                config,
                 storage: Storage::new(config.storage),
                 memory: Memory::new(config.memory, config.os_segment),
             },
