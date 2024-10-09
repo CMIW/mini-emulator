@@ -5,7 +5,7 @@ use std::default::Default;
 pub struct Config {
     pub memory: usize,
     pub storage: usize,
-    os_segment: usize,
+    pub os_segment: usize,
     user_segment: usize,
     virtual_memory: usize,
 }

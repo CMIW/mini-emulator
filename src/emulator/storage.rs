@@ -23,8 +23,17 @@ impl Storage {
         data: Vec<u8>,
     ) -> Result<(), Error> {
         // No memory space has been freed
-        if !self.freed.is_empty() {
-            todo!();
+        if !self.freed.is_empty() && !self.used.is_empty() {
+            // Este problema lo vimos en clase XD no vimos solucion aun XD
+            // Search for the properly sized freed memory
+            for (i, (_, address, data_size)) in self.freed.clone().iter().enumerate() {
+                if *data_size == size {
+                    self.data[*address..*address + *data_size].copy_from_slice(&data[..]);
+                    self.used.push((file_name.to_string(), *address, *data_size));
+                    let _ = self.freed.remove(i);
+                    break;
+                }
+            }
         }
         // No memory has been used
         else if self.used.is_empty() {
@@ -36,7 +45,7 @@ impl Storage {
             }
         } else {
             // last used memory information
-            let (_, address, data_size) = &self.used[self.used.len() - 1];
+            let (_, address, data_size) = &self.used.last().unwrap();
 
             let next_address = address + data_size;
             let available_space = self.data.len() - next_address;

@@ -26,14 +26,14 @@ impl Memory {
 
     pub fn store(&mut self, data: Vec<u8>, size: usize) -> Result<(usize, usize), Error> {
         // No memory space has been freed
-        if !self.freed.is_empty() {
+        if !self.freed.is_empty() && !self.used.is_empty() {
             todo!();
         }
         // No memory has been used
         else if self.used.is_empty() {
             if (self.data.len() - self.os_segment_size) > size {
                 // Copy data to "memory"
-                self.data[self.os_segment_size..size].copy_from_slice(&data[..]);
+                self.data[self.os_segment_size..self.os_segment_size+size].copy_from_slice(&data[..]);
                 self.used.push((self.os_segment_size, size));
                 return Ok((self.os_segment_size, size))
             } else {
@@ -41,11 +41,12 @@ impl Memory {
             }
         } else {
             // Last used memory information
-            let (address, data_size) = &self.used[self.used.len()-1];
+            let (address, data_size) = &self.used.last().unwrap();
 
+            // We need to know if there is enough space in memory
             let next_address = address + data_size;
-            let available_space = (self.data.len() - self.os_segment_size) - next_address;
-
+            let available_space = self.data.len() - next_address;
+            // Store the data in memory when we have the space
             if available_space > size {
                 self.data[next_address..next_address + size].copy_from_slice(&data[..]);
                 self.used.push((next_address, size));
@@ -68,7 +69,7 @@ impl Memory {
             }
         } else {
             // Last stored pcb
-            let (_, address, data_size) = &self.pcb_table[self.pcb_table.len()-1];
+            let (_, address, data_size) = &self.pcb_table.last().unwrap();
 
             let next_address = address + data_size;
             let available_space = self.os_segment_size - next_address;
@@ -81,5 +82,12 @@ impl Memory {
             }
         }
         Ok(())
+    }
+
+    pub fn last_pcb_id(&self) -> usize {
+        match self.pcb_table.last() {
+            Some((id, _, _)) => *id,
+            None => 0,
+        }
     }
 }
