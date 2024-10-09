@@ -9,7 +9,7 @@ use std::io::BufReader;
 use std::path::PathBuf;
 
 use proyecto_1::parser::*;
-use proyecto_1::{config::Config, emulator::{Storage, Memory, PCB}, error::Error};
+use proyecto_1::{config::Config, emulator::{Storage, Memory, PCB, to_bytes}, error::Error};
 
 fn main() -> iced::Result {
     iced::application("Emulator", Emulator::update, Emulator::view).run_with(Emulator::new)
@@ -139,7 +139,7 @@ impl Emulator {
                         let next_id = self.memory.last_pcb_id() + 1;
                         let mut new_pcb = PCB::new(next_id);
                         // Store the instructions on memory
-                        let serialized = bincode::serialize(&instructions).unwrap();
+                        let serialized = to_bytes(instructions);
                         let size = &serialized.len();
                         let (address, size) = match self.memory.store(serialized, *size) {
                             Ok(address) => address,
@@ -248,14 +248,14 @@ impl Emulator {
 
         // Display memory content
         let memory_display = container(scrollable(memory).width(iced::Length::Fill))
-            .height(320)
+            .height(335)
             .width(320)
             .style(container::rounded_box);
 
 
         // Display storage content
         let storage_display = container(scrollable(storage).width(iced::Length::Fill))
-            .height(320)
+            .height(335)
             .width(320)
             .style(container::rounded_box);
 
