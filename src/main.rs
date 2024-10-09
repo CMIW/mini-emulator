@@ -1,5 +1,5 @@
 use iced::font;
-use iced::widget::{button, column, container, row, scrollable};
+use iced::widget::{button, column, container, row, scrollable, text};
 use iced::widget::{rich_text, span};
 use iced::{color, Font};
 use iced::{widget, Task};
@@ -9,7 +9,7 @@ use std::io::BufReader;
 use std::path::PathBuf;
 
 use proyecto_1::parser::*;
-use proyecto_1::{config::Config, emulator::Storage, error::Error};
+use proyecto_1::{config::Config, emulator::{Storage, Memory, PCB}, error::Error};
 
 fn main() -> iced::Result {
     iced::application("Emulator", Emulator::update, Emulator::view).run_with(Emulator::new)
@@ -19,6 +19,7 @@ fn main() -> iced::Result {
 struct Emulator {
     storage: Storage,
     config: Config,
+    memory: Memory,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,7 @@ enum Message {
     FilePicked(Result<Vec<PathBuf>, Error>),
     StoreFiles(Result<Vec<(String, Vec<u8>)>, Error>),
     DialogResult(rfd::MessageDialogResult),
+    Scheduler,
 }
 
 impl Emulator {
@@ -54,6 +56,7 @@ impl Emulator {
             Self {
                 config,
                 storage: Storage::new(config.storage),
+                memory: Memory::new(config.memory, config.os_segment),
             },
             Task::none(),
         )
@@ -61,7 +64,9 @@ impl Emulator {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            // Open the file picker
             Message::OpenFile => Task::perform(pick_file(), Message::FilePicked),
+            // Reads the contents of the selected files
             Message::FilePicked(Ok(paths)) => Task::perform(read_files(paths), Message::StoreFiles),
             Message::FilePicked(Err(error)) => {
                 let dialog = rfd::AsyncMessageDialog::new()
@@ -73,11 +78,9 @@ impl Emulator {
 
                 Task::perform(dialog, Message::DialogResult)
             }
+            // Saves the files content to storage
             Message::StoreFiles(Ok(files)) => {
                 for (file_name, data) in files {
-                    //let instructions = read_file(&data).unwrap();
-                    //let serialized = bincode::serialize(&instructions).unwrap();
-                    //println!("{:?} {} {}", &serialized, &serialized.len(), &data.len());
                     let result = self.storage.store_files(&file_name, data.len(), data);
                     if let Err(error) = result {
                         let dialog = rfd::AsyncMessageDialog::new()
@@ -90,7 +93,7 @@ impl Emulator {
                         return Task::perform(dialog, Message::DialogResult);
                     }
                 }
-                Task::none()
+                Task::done(Message::Scheduler)
             }
             Message::StoreFiles(Err(error)) => {
                 let dialog = rfd::AsyncMessageDialog::new()
@@ -103,6 +106,71 @@ impl Emulator {
                 Task::perform(dialog, Message::DialogResult)
             }
             Message::DialogResult(_result) => Task::none(),
+            // The Scheduler of the OS it will select the next process to execute
+            Message::Scheduler => {
+                println!("Run Scheduler");
+                // No PCB has been created yet so we need create one
+                if self.memory.pcb_table.is_empty() {
+                    // Check the list of stored files for the first one
+                    if !self.storage.used.is_empty() {
+                        // Parse the first stored file
+                        let (_, address, data_size) = self.storage.used.first().unwrap();
+                        let instructions = match read_file(&self.storage.data[*address..*data_size]) {
+                            Ok(instructions) => instructions,
+                            // Parsing Error
+                            Err(error) => {
+                                // Remove file from memory
+                                self.storage.data[*address..*data_size].copy_from_slice(&vec![0;*data_size]);
+                                self.storage.freed.push(self.storage.used.remove(0));
+
+                                // Display the error to the user
+                                let dialog = rfd::AsyncMessageDialog::new()
+                                    .set_level(rfd::MessageLevel::Warning)
+                                    .set_title("Memory Warning")
+                                    .set_description(format!("{}", error))
+                                    .set_buttons(rfd::MessageButtons::Ok)
+                                    .show();
+
+                                return Task::perform(dialog, Message::DialogResult);
+                            },
+                        };
+
+                        // Create new PCB
+                        let next_id = self.memory.last_pcb_id() + 1;
+                        let mut new_pcb = PCB::new(next_id);
+                        // Store the instructions on memory
+                        let serialized = bincode::serialize(&instructions).unwrap();
+                        let size = &serialized.len();
+                        let (address, size) = match self.memory.store(serialized, *size) {
+                            Ok(address) => address,
+                            // No more memory to store PCBs
+                            Err(_) => {
+                                todo!();
+                            }
+                        };
+                        new_pcb.code_segment(address, size);
+
+                        // Allocate the stack memory
+                        let (address, size) = match self.memory.store(vec![0; 5], 5) {
+                            Ok(address) => address,
+                            // No more memory to allocate the stack
+                            Err(_) => {
+                                todo!();
+                            }
+                        };
+                        new_pcb.stack_segment(address, size);
+
+                        println!("{:?}", new_pcb);
+                    }
+                    // No stored files
+                    else {
+                        todo!();
+                    }
+                } else {
+                    todo!();
+                }
+                Task::none()
+            }
         }
     }
 
@@ -132,8 +200,31 @@ impl Emulator {
             .width(220)
             .style(container::rounded_box);
 
-        let mut memory = column![].padding([5, 10]);
+        let mut storage = column![].padding([5, 10]);
         for (index, data) in self.storage.data.chunks(8).enumerate() {
+            let mut spans =
+                vec![span(format!("{:02X}", index))
+                    .color(color!(0xff0000))
+                    .font(Font {
+                        weight: font::Weight::Bold,
+                        ..Font::default()
+                    })];
+            spans.append(
+                &mut data
+                    .iter()
+                    .map(|x| {
+                        span(format!("\t{:02X}", x)).font(Font {
+                            weight: font::Weight::Bold,
+                            ..Font::default()
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            );
+            storage = storage.push(rich_text(spans));
+        }
+
+        let mut memory = column![].padding([5, 10]);
+        for (index, data) in self.memory.data.chunks(8).enumerate() {
             let mut spans =
                 vec![span(format!("{:02X}", index))
                     .color(color!(0xff0000))
@@ -155,16 +246,26 @@ impl Emulator {
             memory = memory.push(rich_text(spans));
         }
 
+        // Display memory content
         let memory_display = container(scrollable(memory).width(iced::Length::Fill))
-            .height(iced::Length::Fill)
+            .height(320)
             .width(320)
             .style(container::rounded_box);
+
+
+        // Display storage content
+        let storage_display = container(scrollable(storage).width(iced::Length::Fill))
+            .height(320)
+            .width(320)
+            .style(container::rounded_box);
+
+
 
         widget::container(column![
             menu_bar,
             row![
                 files_display,
-                memory_display,
+                column![text("Memory"), memory_display, text("Storage"), storage_display],
                 widget::Space::new(iced::Length::Fill, iced::Length::Fill)
             ]
             .spacing(40)
@@ -178,6 +279,7 @@ impl Emulator {
     }
 }
 
+// Reads the content of the selected files and groups the file name with the file content
 async fn read_files(files: Vec<PathBuf>) -> Result<Vec<(String, Vec<u8>)>, Error> {
     let mut files_content: Vec<(String, Vec<u8>)> = vec![];
     for path in files {
@@ -195,6 +297,7 @@ async fn read_files(files: Vec<PathBuf>) -> Result<Vec<(String, Vec<u8>)>, Error
     Ok(files_content)
 }
 
+// Open the file picker dialog to select the files
 async fn pick_file() -> Result<Vec<PathBuf>, Error> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("Choose a file...")
