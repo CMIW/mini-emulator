@@ -1,5 +1,5 @@
-use crate::error::Error;
 use crate::emulator::PCB;
+use crate::error::Error;
 
 #[derive(Debug, Default)]
 pub struct Memory {
@@ -10,7 +10,7 @@ pub struct Memory {
     // (address, size)
     pub freed: Vec<(usize, usize)>,
     // (pcb_id, address, size)
-    pub pcb_table: Vec<(usize, usize, usize)>
+    pub pcb_table: Vec<(usize, usize, usize)>,
 }
 
 impl Memory {
@@ -33,9 +33,10 @@ impl Memory {
         else if self.used.is_empty() {
             if (self.data.len() - self.os_segment_size) > size {
                 // Copy data to "memory"
-                self.data[self.os_segment_size..self.os_segment_size+size].copy_from_slice(&data[..]);
+                self.data[self.os_segment_size..self.os_segment_size + size]
+                    .copy_from_slice(&data[..]);
                 self.used.push((self.os_segment_size, size));
-                return Ok((self.os_segment_size, size))
+                return Ok((self.os_segment_size, size));
             } else {
                 return Err(Error::NotEnoughUserMemory);
             }
@@ -58,7 +59,7 @@ impl Memory {
     }
 
     pub fn store_pcb(&mut self, pcb: PCB) -> Result<(), Error> {
-        let bytes = bincode::serialize(&pcb).unwrap();
+        let bytes: Vec<u8> = pcb.into();
         // No PCB has been stored
         if self.pcb_table.is_empty() {
             if self.os_segment_size > bytes.len() {

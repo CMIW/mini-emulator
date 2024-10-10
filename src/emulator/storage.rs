@@ -29,7 +29,8 @@ impl Storage {
             for (i, (_, address, data_size)) in self.freed.clone().iter().enumerate() {
                 if *data_size == size {
                     self.data[*address..*address + *data_size].copy_from_slice(&data[..]);
-                    self.used.push((file_name.to_string(), *address, *data_size));
+                    self.used
+                        .push((file_name.to_string(), *address, *data_size));
                     let _ = self.freed.remove(i);
                     break;
                 }

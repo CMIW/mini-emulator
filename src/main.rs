@@ -9,7 +9,11 @@ use std::io::BufReader;
 use std::path::PathBuf;
 
 use proyecto_1::parser::*;
-use proyecto_1::{config::Config, emulator::{Storage, Memory, PCB, to_bytes}, error::Error};
+use proyecto_1::{
+    config::Config,
+    emulator::{to_bytes, Memory, Storage, PCB},
+    error::Error,
+};
 
 fn main() -> iced::Result {
     iced::application("Emulator", Emulator::update, Emulator::view).run_with(Emulator::new)
@@ -104,7 +108,7 @@ impl Emulator {
                 Task::perform(dialog, Message::DialogResult)
             }
             Message::DialogResult(_result) => Task::none(),
-            // The Scheduler of the OS it will select the next process to execute
+            // The Scheduler of the OS it will select the next process to execute and send it to the distpacher
             Message::Scheduler => {
                 println!("Run Scheduler");
                 // No PCB has been created yet so we need create one
@@ -113,12 +117,13 @@ impl Emulator {
                     if !self.storage.used.is_empty() {
                         // Parse the first stored file
                         let (_, address, data_size) = self.storage.used.first().unwrap();
-                        let instructions = match read_file(&self.storage.data[*address..*data_size]) {
+                        let instructions = match read_file(&self.storage.data[*address..*data_size]){
                             Ok(instructions) => instructions,
                             // Parsing Error
                             Err(error) => {
                                 // Remove file from memory
-                                self.storage.data[*address..*data_size].copy_from_slice(&vec![0;*data_size]);
+                                self.storage.data[*address..*data_size]
+                                    .copy_from_slice(&vec![0; *data_size]);
                                 self.storage.freed.push(self.storage.used.remove(0));
 
                                 // Display the error to the user
@@ -130,7 +135,7 @@ impl Emulator {
                                     .show();
 
                                 return Task::perform(dialog, Message::DialogResult);
-                            },
+                            }
                         };
 
                         // Create new PCB
@@ -141,7 +146,7 @@ impl Emulator {
                         let size = &serialized.len();
                         let (address, size) = match self.memory.store(serialized, *size) {
                             Ok(address) => address,
-                            // No more memory to store PCBs
+                            // No more memory to store the instructions
                             Err(_) => {
                                 todo!();
                             }
@@ -158,7 +163,13 @@ impl Emulator {
                         };
                         new_pcb.stack_segment(address, size);
 
-                        println!("{:?}", new_pcb);
+                        println!("{:?}", &new_pcb);
+
+                        match self.memory.store_pcb(new_pcb) {
+                            Ok(_) => (),
+                            // No more memory to store PCBs
+                            Err(_) => todo!(),
+                        }
                     }
                     // No stored files
                     else {
@@ -250,20 +261,22 @@ impl Emulator {
             .width(320)
             .style(container::rounded_box);
 
-
         // Display storage content
         let storage_display = container(scrollable(storage).width(iced::Length::Fill))
             .height(335)
             .width(320)
             .style(container::rounded_box);
 
-
-
         widget::container(column![
             menu_bar,
             row![
                 files_display,
-                column![text("Memory"), memory_display, text("Storage"), storage_display],
+                column![
+                    text("Memory"),
+                    memory_display,
+                    text("Storage"),
+                    storage_display
+                ],
                 widget::Space::new(iced::Length::Fill, iced::Length::Fill)
             ]
             .spacing(40)

@@ -1,7 +1,7 @@
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::io::Write;
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub enum Operation {
@@ -96,10 +96,65 @@ impl FromStr for Operation {
     }
 }
 
+impl Operation {
+    pub fn maybe_from(byte: u8) -> Option<Self> {
+        match byte {
+            1..16 => Some(Operation::from(byte)),
+            _ => None,
+        }
+    }
+
+    pub fn maybe_into(option: Option<Operation>) -> u8 {
+        match option {
+            Some(operation) => operation.into(),
+            None => 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Instruction {
     pub operation: Operation,
     pub operands: Vec<String>,
+}
+
+impl From<&[u8]> for Instruction {
+    fn from(bytes: &[u8]) -> Self {
+        let operands_len = bytes[1];
+        let mut operands: Vec<String> = vec![];
+
+        let mut i = 2;
+        // Read the rest of the bytes and converts them to String and store them on a list
+        while i < operands_len {
+            let len = bytes[i as usize];
+            operands.push(
+                std::str::from_utf8(&bytes[(i + 1) as usize..(i + 1 + len) as usize])
+                    .unwrap()
+                    .to_string(),
+            );
+            i += len + 1;
+        }
+
+        Self {
+            // The operand is stored on the first byte
+            operation: Operation::from(bytes[0]),
+            operands,
+        }
+    }
+}
+
+impl From<Instruction> for Vec<u8> {
+    fn from(i: Instruction) -> Vec<u8> {
+        let mut bytes: Vec<u8> = vec![];
+        bytes.push(i.operation.into());
+        for operand in i.operands {
+            let operand_bytes = operand.as_bytes();
+            bytes.push(operand_bytes.len() as u8);
+            let _ = bytes.write(operand_bytes);
+        }
+        bytes.insert(1, (bytes.len() + 1) as u8);
+        bytes
+    }
 }
 
 pub fn to_bytes(instructions: Vec<Instruction>) -> Vec<u8> {
@@ -115,70 +170,24 @@ pub fn to_bytes(instructions: Vec<Instruction>) -> Vec<u8> {
 }
 
 pub fn from_bytes(bytes: &[u8]) -> Vec<Instruction> {
-    let mut instructions:Vec<Instruction> = vec![];
+    let mut instructions: Vec<Instruction> = vec![];
 
     let mut i = 0;
 
     while i < bytes.len() {
-        let len = bytes[i as usize] as usize;
-        let test = &bytes[(i+1) as usize .. (i+len) as usize];
+        let len = bytes[i] as usize;
+        let test = &bytes[(i + 1)..(i + len)];
 
         instructions.push(Instruction::from(test));
-        i += len ;
+        i += len;
     }
 
     instructions
 }
 
-impl From<&[u8]> for Instruction {
-    fn from(bytes: &[u8]) -> Self {
-        let operands_len = bytes[1];
-        let mut operands:Vec<String> = vec![];
-
-        let mut i = 2;
-        // Read the rest of the bytes and converts them to String and store them on a list
-        while i < operands_len  {
-            let len = bytes[i as usize];
-            operands.push(std::str::from_utf8(&bytes[(i+1) as usize .. (i+1+len) as usize]).unwrap().to_string());
-            i += len + 1;
-        }
-
-        Self {
-            // The operand is stored on the first byte
-            operation: Operation::from(bytes[0]),
-            operands: operands,
-        }
-    }
-}
-
-impl From<Instruction> for Vec<u8> {
-    fn from(i: Instruction) -> Vec<u8>{
-        let mut bytes: Vec<u8> = vec![];
-        bytes.push(i.operation.into());
-        for operand in i.operands {
-            let operand_bytes = operand.as_bytes();
-            bytes.push(operand_bytes.len() as u8);
-            let _ = bytes.write(operand_bytes);
-        }
-        bytes.insert(1, (bytes.len() + 1) as u8);
-        bytes
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn serialize_deserialize_operation() {
-        let operation = Operation::MOV;
-
-        let serialize = bincode::serialize(&operation).unwrap();
-
-        let deserialize = bincode::deserialize(&serialize).unwrap();
-
-        assert_eq!(operation, deserialize);
-    }
 
     #[test]
     fn from_into_operation() {
@@ -187,39 +196,6 @@ mod tests {
         let deserialize: Operation = Operation::from(operation_u8);
 
         assert_eq!(operation, deserialize);
-    }
-
-    #[test]
-    fn serialize_deserialize_instruction() {
-        let instruction = Instruction {
-            operation: Operation::MOV,
-            operands: vec!["AX".to_string(), "5".to_string()],
-        };
-
-        let serialize = bincode::serialize(&instruction).unwrap();
-        let deserialize = bincode::deserialize(&serialize).unwrap();
-
-        assert_eq!(instruction, deserialize);
-    }
-
-    #[test]
-    fn serialize_deserialize_instructions() {
-        let instructions = vec![
-            Instruction {
-                operation: Operation::MOV,
-                operands: vec!["AX".to_string(), "5".to_string()],
-            },
-            Instruction {
-                operation: Operation::MOV,
-                operands: vec!["AX".to_string(), "5".to_string()],
-            },
-        ];
-
-        let serialize = bincode::serialize(&instructions).unwrap();
-        println!("bincode {:?}", &serialize.len());
-        let deserialize: Vec<Instruction> = bincode::deserialize(&serialize).unwrap();
-
-        assert_eq!(instructions, deserialize);
     }
 
     #[test]
@@ -249,7 +225,7 @@ mod tests {
         ];
 
         let serialize = to_bytes(instructions.clone());
-        println!("{:?}", &serialize.len());
+
         let deserialize: Vec<Instruction> = from_bytes(&serialize);
 
         assert_eq!(instructions, deserialize);
