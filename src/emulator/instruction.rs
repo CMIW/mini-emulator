@@ -1,5 +1,6 @@
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::io::Write;
 use std::str::FromStr;
 
@@ -92,6 +93,29 @@ impl FromStr for Operation {
             "PUSH" => Ok(Operation::PUSH),
             "POP" => Ok(Operation::POP),
             &_ => Err(Self::Err::ParseOperationError(s.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Operation::PARAM => write!(f, "PARAM"),
+            Operation::MOV => write!(f, "MOV"),
+            Operation::SWAP => write!(f, "SWAP"),
+            Operation::CMP => write!(f, "CMP"),
+            Operation::ADD => write!(f, "ADD"),
+            Operation::SUB => write!(f, "SUB"),
+            Operation::LOAD => write!(f, "LOAD"),
+            Operation::STORE => write!(f, "STORE"),
+            Operation::INC => write!(f, "INC"),
+            Operation::DEC => write!(f, "DEC"),
+            Operation::INT => write!(f, "INT"),
+            Operation::JMP => write!(f, "JMP"),
+            Operation::JE => write!(f, "JE"),
+            Operation::JNE => write!(f, "JNE"),
+            Operation::PUSH => write!(f, "PUSH"),
+            Operation::POP => write!(f, "POP"),
         }
     }
 }

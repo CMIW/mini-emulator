@@ -1,6 +1,8 @@
 use iced::font;
+use iced::widget::Container;
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::widget::{rich_text, span};
+use iced::Element;
 use iced::{color, Font};
 use iced::{widget, Task};
 use std::env;
@@ -11,7 +13,7 @@ use std::path::PathBuf;
 use proyecto_1::parser::*;
 use proyecto_1::{
     config::Config,
-    emulator::{to_bytes, Memory, Storage, PCB, CPU},
+    emulator::{to_bytes, Memory, Storage, CPU, PCB},
     error::Error,
 };
 
@@ -34,7 +36,7 @@ enum Message {
     DialogResult(rfd::MessageDialogResult),
     Scheduler,
     // (pcb_id, address, size)
-    Distpacher((usize, usize, usize))
+    Distpacher((usize, usize, usize)),
 }
 
 impl Emulator {
@@ -121,7 +123,9 @@ impl Emulator {
                         // Parse the first stored file
                         let (_, address, data_size) = self.storage.used.first().unwrap();
 
-                        let instructions = match read_file(&self.storage.data[*address..(*address + *data_size)]){
+                        let instructions = match read_file(
+                            &self.storage.data[*address..(*address + *data_size)],
+                        ) {
                             Ok(instructions) => instructions,
                             // Parsing Error
                             Err(error) => {
@@ -138,7 +142,8 @@ impl Emulator {
                                     .set_buttons(rfd::MessageButtons::Ok)
                                     .show();
 
-                                return Task::perform(dialog, Message::DialogResult).chain(Task::done(Message::Scheduler));
+                                return Task::perform(dialog, Message::DialogResult)
+                                    .chain(Task::done(Message::Scheduler));
                             }
                         };
 
@@ -172,7 +177,7 @@ impl Emulator {
                             // No more memory to store PCBs
                             Err(_) => todo!(),
                         }
-                        return Task::done(Message::Scheduler);
+                        Task::done(Message::Scheduler)
                     }
                     // No stored files
                     else {
@@ -184,12 +189,11 @@ impl Emulator {
                 else {
                     // Aqui irian los algorithmos del scheduler
                     let pcb = self.memory.pcb_table.first().unwrap();
-                    return Task::done(Message::Distpacher(pcb));
+                    Task::done(Message::Distpacher(*pcb))
                 }
-                Task::none()
-            },
-            Message::Distpacher((pcb_id, address, size)) => {
-                let pcb = PCB::from(&self.memory.data[address..address+size]);
+            }
+            Message::Distpacher((_pcb_id, address, size)) => {
+                let pcb = PCB::from(&self.memory.data[address..address + size]);
                 self.cpu.ax = pcb.ax;
                 self.cpu.bx = pcb.bx;
                 self.cpu.cx = pcb.cx;
@@ -199,6 +203,7 @@ impl Emulator {
                 self.cpu.sp = pcb.sp;
                 self.cpu.ir = pcb.ir;
                 self.cpu.z = pcb.z;
+                Task::none()
             }
         }
     }
@@ -230,65 +235,14 @@ impl Emulator {
             .width(220)
             .style(container::rounded_box);
 
-        // Collect storage data
-        let mut storage = column![].padding([5, 10]);
-        for (index, data) in self.storage.data.chunks(8).enumerate() {
-            let mut spans =
-                vec![span(format!("{:02X}", index))
-                    .color(color!(0xff0000))
-                    .font(Font {
-                        weight: font::Weight::Bold,
-                        ..Font::default()
-                    })];
-            spans.append(
-                &mut data
-                    .iter()
-                    .map(|x| {
-                        span(format!("\t{:02X}", x)).font(Font {
-                            weight: font::Weight::Bold,
-                            ..Font::default()
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            storage = storage.push(rich_text(spans));
-        }
-
-        // Collect memory data
-        let mut memory = column![].padding([5, 10]);
-        for (index, data) in self.memory.data.chunks(8).enumerate() {
-            let mut spans =
-                vec![span(format!("{:02X}", index))
-                    .color(color!(0xff0000))
-                    .font(Font {
-                        weight: font::Weight::Bold,
-                        ..Font::default()
-                    })];
-            spans.append(
-                &mut data
-                    .iter()
-                    .map(|x| {
-                        span(format!("\t{:02X}", x)).font(Font {
-                            weight: font::Weight::Bold,
-                            ..Font::default()
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            );
-            memory = memory.push(rich_text(spans));
-        }
-
         // Display memory content
-        let memory_display = container(scrollable(memory).width(iced::Length::Fill))
-            .height(335)
-            .width(320)
-            .style(container::rounded_box);
+        let memory_display = binary_display(&self.memory.data[..]);
 
         // Display storage content
-        let storage_display = container(scrollable(storage).width(iced::Length::Fill))
-            .height(335)
-            .width(320)
-            .style(container::rounded_box);
+        let storage_display = binary_display(&self.storage.data[..]);
+
+        // Display CPU content
+        let cpu_display = cpu_display(&self.cpu);
 
         widget::container(column![
             menu_bar,
@@ -300,6 +254,7 @@ impl Emulator {
                     text("Storage"),
                     storage_display
                 ],
+                column![text("CPU"), cpu_display],
                 widget::Space::new(iced::Length::Fill, iced::Length::Fill)
             ]
             .spacing(40)
@@ -311,6 +266,73 @@ impl Emulator {
         .height(iced::Length::Fill)
         .into()
     }
+}
+
+fn cpu_display(cpu: &CPU) -> Container<'static, Message> {
+    container(column![
+        register_dispay("AX", format!("{:03}", cpu.ax)),
+        register_dispay("BX", format!("{:03}", cpu.bx)),
+        register_dispay("CX", format!("{:03}", cpu.cx)),
+        register_dispay("DX", format!("{:03}", cpu.dx)),
+        register_dispay("AC", format!("{:03}", cpu.ac)),
+        register_dispay("PC", format!("{:03}", cpu.pc)),
+        register_dispay("SP", format!("{:03}", cpu.sp)),
+        register_dispay(
+            "IR",
+            match cpu.ir {
+                Some(operation) => format!("{}", operation),
+                None => format!("None"),
+            }
+        ),
+        register_dispay(" Z", format!("{}", cpu.z)),
+    ])
+    .height(200)
+    .width(100)
+    .padding([5, 10])
+    .style(container::rounded_box)
+}
+
+fn register_dispay<'a>(r_name: &'a str, r: String) -> Element<'a, Message> {
+    rich_text(vec![
+        span(r_name).color(color!(0xff0000)).font(Font {
+            weight: font::Weight::Bold,
+            ..Font::default()
+        }),
+        span(format!("\t{}", r)).font(Font {
+            weight: font::Weight::Bold,
+            ..Font::default()
+        }),
+    ])
+    .into()
+}
+
+fn binary_display(bytes: &[u8]) -> Container<'static, Message> {
+    let mut column = column![].padding([5, 10]);
+    for (index, data) in bytes.chunks(8).enumerate() {
+        let mut spans = vec![span(format!("{:02X}", index))
+            .color(color!(0xff0000))
+            .font(Font {
+                weight: font::Weight::Bold,
+                ..Font::default()
+            })];
+        spans.append(
+            &mut data
+                .iter()
+                .map(|x| {
+                    span(format!("\t{:02X}", x)).font(Font {
+                        weight: font::Weight::Bold,
+                        ..Font::default()
+                    })
+                })
+                .collect::<Vec<_>>(),
+        );
+        column = column.push(rich_text(spans));
+    }
+
+    container(scrollable(column).width(iced::Length::Fill))
+        .height(335)
+        .width(320)
+        .style(container::rounded_box)
 }
 
 // Reads the content of the selected files and groups the file name with the file content

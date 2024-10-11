@@ -22,7 +22,7 @@ pub fn read_file(stream: &[u8]) -> Result<Vec<Instruction>, Error> {
         instruction.reverse();
 
         let operation = instruction.pop().unwrap();
-        
+
         // Ingore empty lines
         if !operation.is_empty() {
             instruction.reverse();
@@ -93,9 +93,7 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
                 }
             }
         }
-        Operation::JMP
-        | Operation::JE
-        | Operation::JNE => {
+        Operation::JMP | Operation::JE | Operation::JNE => {
             if operators.len() != 1 {
                 return Err(Error::InvalidNumberOperands(
                     row,
@@ -109,7 +107,7 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
                     operators[0].to_string(),
                 ));
             }
-        },
+        }
         Operation::ADD
         | Operation::SUB
         | Operation::LOAD
