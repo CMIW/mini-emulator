@@ -39,7 +39,7 @@ impl From<ProcessState> for u8 {
     }
 }
 
-#[derive(Debug, Clone,  Copy, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, Default)]
 pub struct PCB {
     pub id: usize,
     pub code_segment: usize,
@@ -143,7 +143,7 @@ impl From<&[u8]> for PCB {
 
         // Expand and convert back to [u8; 8]
         let mut id_bytes = bytes[1..len].to_vec();
-        id_bytes.resize(8,0);
+        id_bytes.resize(8, 0);
         let id_bytes: [u8; 8] = id_bytes.try_into().unwrap();
         // Convert to usize
         let id = usize::from_ne_bytes(id_bytes);
@@ -154,7 +154,7 @@ impl From<&[u8]> for PCB {
         // bytes[len] = holds the lenght of the next data
         // len + bytes[len] = the range of where to index
         let mut code_segment_bytes = bytes[(len + 1)..(len + (bytes[len] as usize))].to_vec();
-        code_segment_bytes.resize(8,0);
+        code_segment_bytes.resize(8, 0);
         let code_segment_bytes: [u8; 8] = code_segment_bytes.try_into().unwrap();
         // Convert to usize
         let code_segment = usize::from_ne_bytes(code_segment_bytes);
@@ -164,7 +164,7 @@ impl From<&[u8]> for PCB {
 
         // Expand and convert back to [u8; 8]
         let mut code_segment_size_bytes = bytes[(len + 1)..(len + (bytes[len] as usize))].to_vec();
-        code_segment_size_bytes.resize(8,0);
+        code_segment_size_bytes.resize(8, 0);
         let code_segment_size_bytes: [u8; 8] = code_segment_size_bytes.try_into().unwrap();
         // Convert to usize
         let code_segment_size = usize::from_ne_bytes(code_segment_size_bytes);
@@ -174,7 +174,7 @@ impl From<&[u8]> for PCB {
 
         // Expand and convert back to [u8; 8]
         let mut stack_segment_bytes = bytes[(len + 1)..(len + (bytes[len] as usize))].to_vec();
-        stack_segment_bytes.resize(8,0);
+        stack_segment_bytes.resize(8, 0);
         let stack_segment_bytes: [u8; 8] = stack_segment_bytes.try_into().unwrap();
         // Convert to usize
         let stack_segment = usize::from_ne_bytes(stack_segment_bytes);
@@ -184,7 +184,7 @@ impl From<&[u8]> for PCB {
 
         // Expand and convert back to [u8; 8]
         let mut stack_segment_size_bytes = bytes[(len + 1)..(len + (bytes[len] as usize))].to_vec();
-        stack_segment_size_bytes.resize(8,0);
+        stack_segment_size_bytes.resize(8, 0);
         let stack_segment_size_bytes: [u8; 8] = stack_segment_size_bytes.try_into().unwrap();
         // Convert to usize
         let stack_segment_size = usize::from_ne_bytes(stack_segment_size_bytes);
