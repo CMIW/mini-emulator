@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use proyecto_1::parser::*;
 use proyecto_1::{
     config::Config,
-    emulator::{to_bytes, Memory, Storage, PCB},
+    emulator::{to_bytes, Memory, Storage, PCB, CPU},
     error::Error,
 };
 
@@ -23,6 +23,7 @@ fn main() -> iced::Result {
 struct Emulator {
     storage: Storage,
     memory: Memory,
+    cpu: CPU,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +33,8 @@ enum Message {
     StoreFiles(Result<Vec<(String, Vec<u8>)>, Error>),
     DialogResult(rfd::MessageDialogResult),
     Scheduler,
+    // (pcb_id, address, size)
+    Distpacher((usize, usize, usize))
 }
 
 impl Emulator {
@@ -59,6 +62,7 @@ impl Emulator {
             Self {
                 storage: Storage::new(config.storage),
                 memory: Memory::new(config.memory, config.os_segment),
+                cpu: CPU::new(),
             },
             Task::none(),
         )
@@ -110,14 +114,14 @@ impl Emulator {
             Message::DialogResult(_result) => Task::none(),
             // The Scheduler of the OS it will select the next process to execute and send it to the distpacher
             Message::Scheduler => {
-                println!("Run Scheduler");
-                // No PCB has been created yet so we need create one
+                // No PCB has been created yet so we need create 5
                 if self.memory.pcb_table.is_empty() {
                     // Check the list of stored files for the first one
                     if !self.storage.used.is_empty() {
                         // Parse the first stored file
                         let (_, address, data_size) = self.storage.used.first().unwrap();
-                        let instructions = match read_file(&self.storage.data[*address..*data_size]){
+
+                        let instructions = match read_file(&self.storage.data[*address..(*address + *data_size)]){
                             Ok(instructions) => instructions,
                             // Parsing Error
                             Err(error) => {
@@ -134,7 +138,7 @@ impl Emulator {
                                     .set_buttons(rfd::MessageButtons::Ok)
                                     .show();
 
-                                return Task::perform(dialog, Message::DialogResult);
+                                return Task::perform(dialog, Message::DialogResult).chain(Task::done(Message::Scheduler));
                             }
                         };
 
@@ -163,27 +167,44 @@ impl Emulator {
                         };
                         new_pcb.stack_segment(address, size);
 
-                        println!("{:?}", &new_pcb);
-
                         match self.memory.store_pcb(new_pcb) {
                             Ok(_) => (),
                             // No more memory to store PCBs
                             Err(_) => todo!(),
                         }
+                        return Task::done(Message::Scheduler);
                     }
                     // No stored files
                     else {
+                        // Remind the user to add files?
                         todo!();
                     }
-                } else {
-                    todo!();
+                }
+                // Select the pcb from the table and send to distpacher
+                else {
+                    // Aqui irian los algorithmos del scheduler
+                    let pcb = self.memory.pcb_table.first().unwrap();
+                    return Task::done(Message::Distpacher(pcb));
                 }
                 Task::none()
+            },
+            Message::Distpacher((pcb_id, address, size)) => {
+                let pcb = PCB::from(&self.memory.data[address..address+size]);
+                self.cpu.ax = pcb.ax;
+                self.cpu.bx = pcb.bx;
+                self.cpu.cx = pcb.cx;
+                self.cpu.dx = pcb.dx;
+                self.cpu.ac = pcb.ac;
+                self.cpu.pc = pcb.pc;
+                self.cpu.sp = pcb.sp;
+                self.cpu.ir = pcb.ir;
+                self.cpu.z = pcb.z;
             }
         }
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
+        // Menu bar
         let menu_bar = row![
             button("File").on_press(Message::OpenFile),
             widget::Space::new(iced::Length::Shrink, iced::Length::Fill)
@@ -209,6 +230,7 @@ impl Emulator {
             .width(220)
             .style(container::rounded_box);
 
+        // Collect storage data
         let mut storage = column![].padding([5, 10]);
         for (index, data) in self.storage.data.chunks(8).enumerate() {
             let mut spans =
@@ -232,6 +254,7 @@ impl Emulator {
             storage = storage.push(rich_text(spans));
         }
 
+        // Collect memory data
         let mut memory = column![].padding([5, 10]);
         for (index, data) in self.memory.data.chunks(8).enumerate() {
             let mut spans =
