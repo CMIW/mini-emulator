@@ -49,7 +49,7 @@ pub fn read_file(stream: &[u8]) -> Result<Vec<Instruction>, Error> {
 fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> Result<Operands, Error> {
     match operation {
         Operation::PARAM => {
-            if operators.len() != 3 {
+            if operators.len() > 3 || operators.len() == 0 {
                 return Err(Error::InvalidNumberOperands(
                     row,
                     *operation,

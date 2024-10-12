@@ -47,6 +47,7 @@ pub struct PCB {
     pub stack_segment: usize,
     pub stack_segment_size: usize,
     pub pc: usize,
+    pub sp: usize,
     pub process_state: ProcessState,
     pub priority: u8,
     pub ax: u8,
@@ -54,7 +55,6 @@ pub struct PCB {
     pub cx: u8,
     pub dx: u8,
     pub ac: u8,
-    pub sp: u8,
     pub ir: Option<Operation>,
     pub z: bool,
 }
@@ -77,7 +77,7 @@ impl PCB {
     pub fn stack_segment(&mut self, address: usize, size: usize) -> &mut Self {
         self.stack_segment = address;
         self.stack_segment_size = size;
-
+        self.sp = self.stack_segment;
         self
     }
 }
@@ -123,6 +123,16 @@ impl From<PCB> for Vec<u8> {
             let _ = bytes.write(&pc_bytes);
         }
 
+        if pcb.sp == 0 {
+            bytes.push(2);
+            let _ = bytes.write(&[0]);
+        } else {
+            let mut sp_bytes = pcb.sp.to_ne_bytes().to_vec();
+            sp_bytes.retain(|&x| x != 0);
+            bytes.push((sp_bytes.len() + 1) as u8);
+            let _ = bytes.write(&sp_bytes);
+        }
+
         bytes.push(pcb.process_state.into());
 
         bytes.push(pcb.priority);
@@ -132,7 +142,6 @@ impl From<PCB> for Vec<u8> {
         bytes.push(pcb.cx);
         bytes.push(pcb.dx);
         bytes.push(pcb.ac);
-        bytes.push(pcb.sp);
         bytes.push(Operation::maybe_into(pcb.ir));
         bytes.push(pcb.z.into());
 
@@ -206,6 +215,16 @@ impl From<&[u8]> for PCB {
         // Update index accumulator
         len += bytes[len] as usize;
 
+        // Expand and convert back to [u8; 8]
+        let mut sp_bytes = bytes[(len + 1)..(len + (bytes[len] as usize))].to_vec();
+        sp_bytes.resize(8, 0);
+        let sp_bytes: [u8; 8] = sp_bytes.try_into().unwrap();
+        // Convert to usize
+        let sp = usize::from_ne_bytes(sp_bytes);
+
+        // Update index accumulator
+        len += bytes[len] as usize;
+
         let process_state = ProcessState::from(bytes[len]);
 
         PCB {
@@ -215,6 +234,7 @@ impl From<&[u8]> for PCB {
             stack_segment,
             stack_segment_size,
             pc,
+            sp,
             process_state,
             priority: bytes[len + 1],
             ax: bytes[len + 2],
@@ -222,9 +242,8 @@ impl From<&[u8]> for PCB {
             cx: bytes[len + 4],
             dx: bytes[len + 5],
             ac: bytes[len + 6],
-            sp: bytes[len + 7],
-            ir: Operation::maybe_from(bytes[len + 8]),
-            z: bytes[len + 9] != 0,
+            ir: Operation::maybe_from(bytes[len + 7]),
+            z: bytes[len + 8] != 0,
         }
     }
 }

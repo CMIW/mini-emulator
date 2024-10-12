@@ -8,6 +8,7 @@ use iced::Subscription;
 use iced::{color, Font};
 use iced::{widget, Task};
 use std::env;
+use std::mem;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -16,7 +17,7 @@ use std::time::Duration;
 use proyecto_1::parser::*;
 use proyecto_1::{
     config::Config,
-    emulator::{to_bytes, Memory, Storage, CPU, PCB, Instruction},
+    emulator::{to_bytes, Memory, Storage, CPU, PCB, Instruction, Interupt, Register, Operands, Operation, ProcessState},
     error::Error,
 };
 
@@ -201,7 +202,7 @@ impl Emulator {
                 }
             }
             Message::Distpacher((_pcb_id, address, size)) => {
-                let pcb = PCB::from(&self.memory.data[address..address + size]);
+                let mut pcb = PCB::from(&self.memory.data[address..address + size]);
                 self.cpu.ax = pcb.ax;
                 self.cpu.bx = pcb.bx;
                 self.cpu.cx = pcb.cx;
@@ -212,13 +213,293 @@ impl Emulator {
                 self.cpu.ir = pcb.ir;
                 self.cpu.z = pcb.z;
                 self.running = true;
+
+                pcb.process_state = ProcessState::Running;
+                let bytes: Vec<u8> = pcb.into();
+                self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
                 Task::none()
             }
             Message::Tick => {
                 // Fetch
                 let instruction = Instruction::from(&self.memory.data[self.cpu.pc+1..self.cpu.pc+1 + 5]);
-                println!("{:?}", Instruction::from(&self.memory.data[self.cpu.pc+1..self.cpu.pc+1 + 5]));
+                //println!("{:?}", Instruction::from(&self.memory.data[self.cpu.pc+1..self.cpu.pc+1 + 5]));
                 self.cpu.ir = Some(instruction.operation);
+                match instruction.operation {
+                    Operation::LOAD => {
+                        match instruction.operands {
+                            Operands::V2(r) => {
+                                match r {
+                                    Register::AX => self.cpu.ac = self.cpu.ax,
+                                    Register::BX => self.cpu.ac = self.cpu.bx,
+                                    Register::CX => self.cpu.ac = self.cpu.cx,
+                                    Register::DX => self.cpu.ac = self.cpu.dx,
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::STORE => {
+                        match instruction.operands {
+                            Operands::V2(r) => {
+                                match r {
+                                    Register::AX => self.cpu.ax = self.cpu.ac,
+                                    Register::BX => self.cpu.bx = self.cpu.ac,
+                                    Register::CX => self.cpu.cx = self.cpu.ac,
+                                    Register::DX => self.cpu.dx = self.cpu.ac,
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::MOV => {
+                        match instruction.operands {
+                            Operands::V5(r, num) => {
+                                match r {
+                                    Register::AX => self.cpu.ax = num,
+                                    Register::BX => self.cpu.bx = num,
+                                    Register::CX => self.cpu.cx = num,
+                                    Register::DX => self.cpu.dx = num,
+                                }
+                            },
+                            Operands::V6(r1, r2) => {
+                                match r1 {
+                                    Register::AX => {
+                                        match r2 {
+                                            Register::AX => self.cpu.ax = self.cpu.ax,
+                                            Register::BX => self.cpu.ax = self.cpu.bx,
+                                            Register::CX => self.cpu.ax = self.cpu.cx,
+                                            Register::DX => self.cpu.ax = self.cpu.dx,
+                                        }
+                                    },
+                                    Register::BX => {
+                                        match r2 {
+                                            Register::AX => self.cpu.bx = self.cpu.ax,
+                                            Register::BX => self.cpu.bx = self.cpu.bx,
+                                            Register::CX => self.cpu.bx = self.cpu.cx,
+                                            Register::DX => self.cpu.bx = self.cpu.dx,
+                                        }
+                                    },
+                                    Register::CX => {
+                                        match r2 {
+                                            Register::AX => self.cpu.cx = self.cpu.ax,
+                                            Register::BX => self.cpu.cx = self.cpu.bx,
+                                            Register::CX => self.cpu.cx = self.cpu.cx,
+                                            Register::DX => self.cpu.cx = self.cpu.dx,
+                                        }
+                                    },
+                                    Register::DX => {
+                                        match r2 {
+                                            Register::AX => self.cpu.dx = self.cpu.ax,
+                                            Register::BX => self.cpu.dx = self.cpu.bx,
+                                            Register::CX => self.cpu.dx = self.cpu.cx,
+                                            Register::DX => self.cpu.dx = self.cpu.dx,
+                                        }
+                                    },
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::ADD => {
+                        match instruction.operands {
+                            Operands::V2(r) => {
+                                match r {
+                                    Register::AX => self.cpu.ac += self.cpu.ax,
+                                    Register::BX => self.cpu.ac += self.cpu.bx,
+                                    Register::CX => self.cpu.ac += self.cpu.cx,
+                                    Register::DX => self.cpu.ac += self.cpu.dx,
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::SUB => {
+                        match instruction.operands {
+                            Operands::V2(r) => {
+                                match r {
+                                    Register::AX => self.cpu.ac -= self.cpu.ax,
+                                    Register::BX => self.cpu.ac -= self.cpu.bx,
+                                    Register::CX => self.cpu.ac -= self.cpu.cx,
+                                    Register::DX => self.cpu.ac -= self.cpu.dx,
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::INC => {
+                        match instruction.operands {
+                            Operands::V0 => self.cpu.ac += 1,
+                            Operands::V2(r) => {
+                                match r {
+                                    Register::AX => self.cpu.ac += self.cpu.ax,
+                                    Register::BX => self.cpu.ac += self.cpu.bx,
+                                    Register::CX => self.cpu.ac += self.cpu.cx,
+                                    Register::DX => self.cpu.ac += self.cpu.dx,
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::DEC => {
+                        match instruction.operands {
+                            Operands::V0 => self.cpu.ac -= 1,
+                            Operands::V2(r) => {
+                                match r {
+                                    Register::AX => self.cpu.ac -= self.cpu.ax,
+                                    Register::BX => self.cpu.ac -= self.cpu.bx,
+                                    Register::CX => self.cpu.ac -= self.cpu.cx,
+                                    Register::DX => self.cpu.ac -= self.cpu.dx,
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::SWAP => {
+                        match instruction.operands {
+                            Operands::V6(r1, r2) => {
+                                match r1 {
+                                    Register::AX => {
+                                        match r2 {
+                                            Register::BX => mem::swap(&mut self.cpu.ax, &mut self.cpu.bx),
+                                            Register::CX => mem::swap(&mut self.cpu.ax, &mut self.cpu.cx),
+                                            Register::DX => mem::swap(&mut self.cpu.ax, &mut self.cpu.dx),
+                                            _ => {},
+                                        }
+                                    },
+                                    Register::BX => {
+                                        match r2 {
+                                            Register::AX => mem::swap(&mut self.cpu.bx, &mut self.cpu.ax),
+                                            Register::CX => mem::swap(&mut self.cpu.bx, &mut self.cpu.cx),
+                                            Register::DX => mem::swap(&mut self.cpu.bx, &mut self.cpu.dx),
+                                            _ => {},
+                                        }
+                                    },
+                                    Register::CX => {
+                                        match r2 {
+                                            Register::AX => mem::swap(&mut self.cpu.cx, &mut self.cpu.ax),
+                                            Register::BX => mem::swap(&mut self.cpu.cx, &mut self.cpu.bx),
+                                            Register::DX => mem::swap(&mut self.cpu.cx, &mut self.cpu.dx),
+                                            _ => {},
+                                        }
+                                    },
+                                    Register::DX => {
+                                        match r2 {
+                                            Register::AX => mem::swap(&mut self.cpu.dx, &mut self.cpu.ax),
+                                            Register::BX => mem::swap(&mut self.cpu.dx, &mut self.cpu.bx),
+                                            Register::CX => mem::swap(&mut self.cpu.dx, &mut self.cpu.cx),
+                                            _ => {},
+                                        }
+                                    },
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::INT => {
+                        match instruction.operands {
+                            Operands::V3(i) => {
+                                match i {
+                                    Interupt::H09 => self.cpu.ac = self.cpu.ax,
+                                    Interupt::H10 => todo!(),
+                                    Interupt::H20 => todo!(),
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::JMP => {
+                        match instruction.operands {
+                            Operands::V1(s, num) => {
+                                match s {
+                                    0 => self.cpu.pc += (6 * num) as usize,
+                                    1 => self.cpu.pc -= (6 * num) as usize,
+                                    _ => {},
+                                }
+                            },
+                            _ => {},
+                        }
+                    }
+                    Operation::JE => {
+                        if self.cpu.z {
+                            match instruction.operands {
+                                Operands::V1(s, num) => {
+                                    match s {
+                                        0 => self.cpu.pc += (6 * num) as usize,
+                                        1 => self.cpu.pc -= (6 * num) as usize,
+                                        _ => {},
+                                    }
+                                },
+                                _ => {},
+                            }
+                        }
+                    },
+                    Operation::JNE => {
+                        if !self.cpu.z {
+                            match instruction.operands {
+                                Operands::V1(s, num) => {
+                                    match s {
+                                        0 => self.cpu.pc += (6 * num) as usize,
+                                        1 => self.cpu.pc -= (6 * num) as usize,
+                                        _ => {},
+                                    }
+                                },
+                                _ => {},
+                            }
+                        }
+                    },
+                    Operation::PUSH => {
+                        match instruction.operands {
+                            Operands::V2(r) => {
+                                match r {
+                                    Register::AX => {
+                                        self.memory.data[self.cpu.sp] = self.cpu.ax;
+                                        self.cpu.sp += 1;
+                                    },
+                                    Register::BX => {
+                                        self.memory.data[self.cpu.sp] = self.cpu.bx;
+                                        self.cpu.sp += 1;
+                                    },
+                                    Register::CX => {
+                                        self.memory.data[self.cpu.sp] = self.cpu.cx;
+                                        self.cpu.sp += 1;
+                                    },
+                                    Register::DX => {
+                                        self.memory.data[self.cpu.sp] = self.cpu.dx;
+                                        self.cpu.sp += 1;
+                                    },
+                                }
+                            },
+                            _ => {},
+                        }
+                    },
+                    Operation::POP => {
+                        match instruction.operands {
+                            Operands::V2(r) => {
+                                match r {
+                                    Register::AX => {
+                                        self.cpu.ax = self.memory.data[self.cpu.sp];
+                                        self.cpu.sp -= 1;
+                                    },
+                                    Register::BX => {
+                                        self.cpu.bx = self.memory.data[self.cpu.sp];
+                                        self.cpu.sp -= 1;
+                                    },
+                                    Register::CX => {
+                                        self.cpu.cx = self.memory.data[self.cpu.sp];
+                                        self.cpu.sp -= 1;
+                                    },
+                                    Register::DX => {
+                                        self.cpu.dx = self.memory.data[self.cpu.sp];
+                                        self.cpu.sp -= 1;
+                                    },
+                                }
+                            },
+                            _ => {},
+                        }
+                    }
+                    _ => {}
+                }
+
                 self.cpu.pc += 6;
                 Task::none()
             }
