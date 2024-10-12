@@ -46,10 +46,14 @@ pub fn read_file(stream: &[u8]) -> Result<Vec<Instruction>, Error> {
     Ok(instructions)
 }
 
-fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> Result<Operands, Error> {
+fn validate_operators(
+    row: usize,
+    operation: &Operation,
+    operators: &[&str],
+) -> Result<Operands, Error> {
     match operation {
         Operation::PARAM => {
-            if operators.len() > 3 || operators.len() == 0 {
+            if operators.len() > 3 || operators.is_empty() {
                 return Err(Error::InvalidNumberOperands(
                     row,
                     *operation,
@@ -73,16 +77,14 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
                             let line3 = &operators[2].replace("-", "");
                             let line3 = line3.replace("+", "");
                             match line3.parse::<u8>() {
-                                Ok(num3) => {
-                                    return  Ok(Operands::V4(num1, num2, num3));
-                                }
-                                Err(_) => return Err(Error::ParseIntError),
+                                Ok(num3) => Ok(Operands::V4(num1, num2, num3)),
+                                Err(_) => Err(Error::ParseIntError),
                             }
                         }
-                        Err(_) => return Err(Error::ParseIntError),
+                        Err(_) => Err(Error::ParseIntError),
                     }
                 }
-                Err(_) => return Err(Error::ParseIntError),
+                Err(_) => Err(Error::ParseIntError),
             }
         }
         Operation::MOV => {
@@ -103,24 +105,20 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
                 Ok(r1) => {
                     if REGISTERS.contains(&operators[1]) {
                         match Register::from_str(operators[1]) {
-                            Ok(r2) => {
-                                return Ok(Operands::V6(r1, r2));
-                            }
-                            Err(err) => return Err(err),
-                        };
+                            Ok(r2) => Ok(Operands::V6(r1, r2)),
+                            Err(err) => Err(err),
+                        }
                     } else {
                         let line = &operators[1].replace("-", "");
                         let line = line.replace("+", "");
                         match line.parse::<u8>() {
-                            Ok(num) => {
-                                return Ok(Operands::V5(r1, num));
-                            }
-                            Err(_) => return Err(Error::ParseIntError),
+                            Ok(num) => Ok(Operands::V5(r1, num)),
+                            Err(_) => Err(Error::ParseIntError),
                         }
                     }
                 }
-                Err(err) => return Err(err),
-            };
+                Err(err) => Err(err),
+            }
         }
         Operation::SWAP | Operation::CMP => {
             if operators.len() != 2 {
@@ -137,16 +135,12 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
                 }
             }
             match Register::from_str(operators[0]) {
-                Ok(r1) => {
-                    match Register::from_str(operators[1]) {
-                        Ok(r2) => {
-                            return Ok(Operands::V6(r1, r2));
-                        }
-                        Err(err) => return Err(err),
-                    };
-                }
-                Err(err) => return Err(err),
-            };
+                Ok(r1) => match Register::from_str(operators[1]) {
+                    Ok(r2) => Ok(Operands::V6(r1, r2)),
+                    Err(err) => Err(err),
+                },
+                Err(err) => Err(err),
+            }
         }
         Operation::JMP | Operation::JE | Operation::JNE => {
             if operators.len() != 1 {
@@ -165,18 +159,14 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
             if operators[0].contains("-") {
                 let line = &operators[0].replace("-", "");
                 match line.parse::<u8>() {
-                    Ok(num) => {
-                        return Ok(Operands::V1(1, num));
-                    }
-                    Err(_) => return Err(Error::ParseIntError),
+                    Ok(num) => Ok(Operands::V1(1, num)),
+                    Err(_) => Err(Error::ParseIntError),
                 }
             } else {
                 let line = &operators[0].replace("+", "");
                 match line.parse::<u8>() {
-                    Ok(num) => {
-                        return Ok(Operands::V1(0, num));
-                    }
-                    Err(_) => return Err(Error::ParseIntError),
+                    Ok(num) => Ok(Operands::V1(0, num)),
+                    Err(_) => Err(Error::ParseIntError),
                 }
             }
         }
@@ -201,10 +191,10 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
             }
             match Register::from_str(operators[0]) {
                 Ok(test) => {
-                    return Ok(Operands::V2(test));
+                    Ok(Operands::V2(test))
                 }
-                Err(err) => return Err(err),
-            };
+                Err(err) => Err(err),
+            }
         }
         Operation::INT => {
             if operators.len() != 1 {
@@ -222,10 +212,10 @@ fn validate_operators(row: usize, operation: &Operation, operators: &[&str]) -> 
             }
             match Interupt::from_str(operators[0]) {
                 Ok(test) => {
-                    return Ok(Operands::V3(test));
+                    Ok(Operands::V3(test))
                 }
-                Err(err) => return Err(err),
-            };
+                Err(err) => Err(err),
+            }
         }
         Operation::INC | Operation::DEC => {
             if operators.len() > 1 {
