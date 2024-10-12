@@ -261,7 +261,7 @@ impl From<&[u8]> for Operands {
             1 => Operands::V1(bytes[1], bytes[2]),
             2 => Operands::V2(Register::from(bytes[1])),
             3 => Operands::V3(Interupt::from(bytes[1])),
-            4 => Operands::V4(bytes[1],bytes[2], bytes[3]),
+            4 => Operands::V4(bytes[1], bytes[2], bytes[3]),
             5 => Operands::V5(Register::from(bytes[1]), bytes[2]),
             6 => Operands::V6(Register::from(bytes[1]), Register::from(bytes[2])),
             _ => todo!(),
