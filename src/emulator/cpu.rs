@@ -7,7 +7,7 @@ pub struct CPU {
     pub cx: u8,
     pub dx: u8,
     pub ac: u8,
-    pub pc: u8,
+    pub pc: usize,
     pub sp: u8,
     pub ir: Option<Operation>,
     pub z: bool,

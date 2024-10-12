@@ -10,7 +10,7 @@ pub enum ProcessState {
     New,
     Ready,
     Running,
-    Waiting,
+    Blocked,
     Terminated,
 }
 
@@ -20,7 +20,7 @@ impl From<u8> for ProcessState {
             1 => ProcessState::New,
             2 => ProcessState::Ready,
             3 => ProcessState::Running,
-            4 => ProcessState::Waiting,
+            4 => ProcessState::Blocked,
             5 => ProcessState::Terminated,
             _ => todo!(),
         }
@@ -33,7 +33,7 @@ impl From<ProcessState> for u8 {
             ProcessState::New => 1,
             ProcessState::Ready => 2,
             ProcessState::Running => 3,
-            ProcessState::Waiting => 4,
+            ProcessState::Blocked => 4,
             ProcessState::Terminated => 5,
         }
     }
@@ -46,6 +46,7 @@ pub struct PCB {
     pub code_segment_size: usize,
     pub stack_segment: usize,
     pub stack_segment_size: usize,
+    pub pc: usize,
     pub process_state: ProcessState,
     pub priority: u8,
     pub ax: u8,
@@ -53,7 +54,6 @@ pub struct PCB {
     pub cx: u8,
     pub dx: u8,
     pub ac: u8,
-    pub pc: u8,
     pub sp: u8,
     pub ir: Option<Operation>,
     pub z: bool,
@@ -70,7 +70,7 @@ impl PCB {
     pub fn code_segment(&mut self, address: usize, size: usize) -> &mut Self {
         self.code_segment = address;
         self.code_segment_size = size;
-
+        self.pc = self.code_segment;
         self
     }
 
@@ -113,10 +113,15 @@ impl From<PCB> for Vec<u8> {
         bytes.push((stack_segment_size_bytes.len() + 1) as u8);
         let _ = bytes.write(&stack_segment_size_bytes);
 
-        let mut stack_segment_size_bytes = pcb.stack_segment_size.to_ne_bytes().to_vec();
-        stack_segment_size_bytes.retain(|&x| x != 0);
-        bytes.push((stack_segment_size_bytes.len() + 1) as u8);
-        let _ = bytes.write(&stack_segment_size_bytes);
+        if pcb.pc == 0 {
+            bytes.push(2);
+            let _ = bytes.write(&[0]);
+        } else {
+            let mut pc_bytes = pcb.pc.to_ne_bytes().to_vec();
+            pc_bytes.retain(|&x| x != 0);
+            bytes.push((pc_bytes.len() + 1) as u8);
+            let _ = bytes.write(&pc_bytes);
+        }
 
         bytes.push(pcb.process_state.into());
 
@@ -127,7 +132,6 @@ impl From<PCB> for Vec<u8> {
         bytes.push(pcb.cx);
         bytes.push(pcb.dx);
         bytes.push(pcb.ac);
-        bytes.push(pcb.pc);
         bytes.push(pcb.sp);
         bytes.push(Operation::maybe_into(pcb.ir));
         bytes.push(pcb.z.into());
@@ -192,9 +196,17 @@ impl From<&[u8]> for PCB {
         // Update index accumulator
         len += bytes[len] as usize;
 
-        let process_state = ProcessState::from(bytes[len + (bytes[len] as usize)]);
+        // Expand and convert back to [u8; 8]
+        let mut pc_bytes = bytes[(len + 1)..(len + (bytes[len] as usize))].to_vec();
+        pc_bytes.resize(8, 0);
+        let pc_bytes: [u8; 8] = pc_bytes.try_into().unwrap();
+        // Convert to usize
+        let pc = usize::from_ne_bytes(pc_bytes);
+
         // Update index accumulator
         len += bytes[len] as usize;
+
+        let process_state = ProcessState::from(bytes[len]);
 
         PCB {
             id,
@@ -202,6 +214,7 @@ impl From<&[u8]> for PCB {
             code_segment_size,
             stack_segment,
             stack_segment_size,
+            pc,
             process_state,
             priority: bytes[len + 1],
             ax: bytes[len + 2],
@@ -209,10 +222,9 @@ impl From<&[u8]> for PCB {
             cx: bytes[len + 4],
             dx: bytes[len + 5],
             ac: bytes[len + 6],
-            pc: bytes[len + 7],
-            sp: bytes[len + 8],
-            ir: Operation::maybe_from(bytes[len + 9]),
-            z: bytes[len + 10] != 0,
+            sp: bytes[len + 7],
+            ir: Operation::maybe_from(bytes[len + 8]),
+            z: bytes[len + 9] != 0,
         }
     }
 }

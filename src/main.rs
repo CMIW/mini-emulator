@@ -1,24 +1,29 @@
 use iced::font;
+use iced::time;
 use iced::widget::Container;
 use iced::widget::{button, column, container, row, scrollable, text};
 use iced::widget::{rich_text, span};
 use iced::Element;
+use iced::Subscription;
 use iced::{color, Font};
 use iced::{widget, Task};
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use proyecto_1::parser::*;
 use proyecto_1::{
     config::Config,
-    emulator::{to_bytes, Memory, Storage, CPU, PCB},
+    emulator::{to_bytes, Memory, Storage, CPU, PCB, Instruction},
     error::Error,
 };
 
 fn main() -> iced::Result {
-    iced::application("Emulator", Emulator::update, Emulator::view).run_with(Emulator::new)
+    iced::application("Emulator", Emulator::update, Emulator::view)
+        .subscription(Emulator::subscription)
+        .run_with(Emulator::new)
 }
 
 #[derive(Default)]
@@ -26,15 +31,17 @@ struct Emulator {
     storage: Storage,
     memory: Memory,
     cpu: CPU,
+    running: bool,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
+    Tick,
     OpenFile,
+    Scheduler,
+    DialogResult(rfd::MessageDialogResult),
     FilePicked(Result<Vec<PathBuf>, Error>),
     StoreFiles(Result<Vec<(String, Vec<u8>)>, Error>),
-    DialogResult(rfd::MessageDialogResult),
-    Scheduler,
     // (pcb_id, address, size)
     Distpacher((usize, usize, usize)),
 }
@@ -65,6 +72,7 @@ impl Emulator {
                 storage: Storage::new(config.storage),
                 memory: Memory::new(config.memory, config.os_segment),
                 cpu: CPU::new(),
+                running: false,
             },
             Task::none(),
         )
@@ -130,7 +138,7 @@ impl Emulator {
                             // Parsing Error
                             Err(error) => {
                                 // Remove file from memory
-                                self.storage.data[*address..*data_size]
+                                self.storage.data[*address..*address+*data_size]
                                     .copy_from_slice(&vec![0; *data_size]);
                                 self.storage.freed.push(self.storage.used.remove(0));
 
@@ -203,9 +211,25 @@ impl Emulator {
                 self.cpu.sp = pcb.sp;
                 self.cpu.ir = pcb.ir;
                 self.cpu.z = pcb.z;
+                self.running = true;
+                Task::none()
+            }
+            Message::Tick => {
+                // Fetch
+                let instruction = Instruction::from(&self.memory.data[self.cpu.pc+1..self.cpu.pc+1 + 5]);
+                println!("{:?}", Instruction::from(&self.memory.data[self.cpu.pc+1..self.cpu.pc+1 + 5]));
+                self.cpu.ir = Some(instruction.operation);
+                self.cpu.pc += 6;
                 Task::none()
             }
         }
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        if self.running {
+            return time::every(Duration::from_millis(1000)).map(|_| Message::Tick);
+        }
+        Subscription::none()
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
@@ -281,18 +305,18 @@ fn cpu_display(cpu: &CPU) -> Container<'static, Message> {
             "IR",
             match cpu.ir {
                 Some(operation) => format!("{}", operation),
-                None => format!("None"),
+                None => "None".to_string(),
             }
         ),
         register_dispay(" Z", format!("{}", cpu.z)),
     ])
     .height(200)
-    .width(100)
+    .width(115)
     .padding([5, 10])
     .style(container::rounded_box)
 }
 
-fn register_dispay<'a>(r_name: &'a str, r: String) -> Element<'a, Message> {
+fn register_dispay(r_name: &str, r: String) -> Element<'_, Message> {
     rich_text(vec![
         span(r_name).color(color!(0xff0000)).font(Font {
             weight: font::Weight::Bold,
