@@ -190,9 +190,7 @@ fn validate_operators(
                 ));
             }
             match Register::from_str(operators[0]) {
-                Ok(test) => {
-                    Ok(Operands::V2(test))
-                }
+                Ok(test) => Ok(Operands::V2(test)),
                 Err(err) => Err(err),
             }
         }
@@ -211,9 +209,7 @@ fn validate_operators(
                 ));
             }
             match Interupt::from_str(operators[0]) {
-                Ok(test) => {
-                    Ok(Operands::V3(test))
-                }
+                Ok(test) => Ok(Operands::V3(test)),
                 Err(err) => Err(err),
             }
         }
