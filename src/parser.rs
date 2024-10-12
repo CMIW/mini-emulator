@@ -70,18 +70,26 @@ fn validate_operators(
             let line1 = line1.replace("+", "");
             match line1.parse::<u8>() {
                 Ok(num1) => {
-                    let line2 = &operators[1].replace("-", "");
-                    let line2 = line2.replace("+", "");
-                    match line2.parse::<u8>() {
-                        Ok(num2) => {
-                            let line3 = &operators[2].replace("-", "");
-                            let line3 = line3.replace("+", "");
-                            match line3.parse::<u8>() {
-                                Ok(num3) => Ok(Operands::V4(num1, num2, num3)),
-                                Err(_) => Err(Error::ParseIntError),
+                    if operators.len() == 2 {
+                        let line2 = &operators[1].replace("-", "");
+                        let line2 = line2.replace("+", "");
+                        match line2.parse::<u8>() {
+                            Ok(num2) => {
+                                if operators.len() == 3 {
+                                    let line3 = &operators[2].replace("-", "");
+                                    let line3 = line3.replace("+", "");
+                                    match line3.parse::<u8>() {
+                                        Ok(num3) => Ok(Operands::V4(num1, num2, num3)),
+                                        Err(_) => Err(Error::ParseIntError),
+                                    }
+                                } else {
+                                    Ok(Operands::V4(num1, num2, 0))
+                                }
                             }
+                            Err(_) => Err(Error::ParseIntError),
                         }
-                        Err(_) => Err(Error::ParseIntError),
+                    } else {
+                        Ok(Operands::V4(num1, 0, 0))
                     }
                 }
                 Err(_) => Err(Error::ParseIntError),
