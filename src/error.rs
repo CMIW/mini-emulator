@@ -4,6 +4,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug, Clone)]
 pub enum Error {
+    #[error("Not a valid value, value must be <= 255.")]
+    ParseIntError,
     #[error("File select dialog closed.")]
     DialogClosed,
     #[error("IO Error")]
@@ -24,6 +26,10 @@ pub enum Error {
     InvalidOperation(usize, String),
     #[error("Invalid Operation '{0}'.")]
     ParseOperationError(String),
+    #[error("Invalid Register '{0}'.")]
+    ParseRegisterError(String),
+    #[error("Invalid Interupt code '{0}'.")]
+    ParseInteruptError(String),
     #[error("Invalid number of operands for {1:?}: {2:?} on line: {0}.")]
     InvalidNumberOperands(usize, Operation, Vec<String>),
     #[error("Invalid operand '{2:?}' for {1:?} on line: {0}.")]

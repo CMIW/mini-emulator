@@ -1,7 +1,6 @@
 use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::io::Write;
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
@@ -136,33 +135,152 @@ impl Operation {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+// ["AX", "BX", "CX", "DX"]
+pub enum Register {
+    AX,
+    BX,
+    CX,
+    DX,
+}
+
+impl From<u8> for Register {
+    fn from(i: u8) -> Self {
+        match i {
+            1 => Register::AX,
+            2 => Register::BX,
+            3 => Register::CX,
+            4 => Register::DX,
+            _ => todo!(),
+        }
+    }
+}
+
+impl From<Register> for u8 {
+    fn from(o: Register) -> u8 {
+        match o {
+            Register::AX => 1,
+            Register::BX => 2,
+            Register::CX => 3,
+            Register::DX => 4,
+        }
+    }
+}
+
+impl FromStr for Register {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "AX" => Ok(Register::AX),
+            "BX" => Ok(Register::BX),
+            "CX" => Ok(Register::CX),
+            "DX" => Ok(Register::DX),
+            &_ => Err(Self::Err::ParseRegisterError(s.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+// ["09H", "10H", "20H"]
+pub enum Interupt {
+    H09,
+    H10,
+    H20,
+}
+
+impl From<u8> for Interupt {
+    fn from(i: u8) -> Self {
+        match i {
+            1 => Interupt::H09,
+            2 => Interupt::H10,
+            3 => Interupt::H20,
+            _ => todo!(),
+        }
+    }
+}
+
+impl From<Interupt> for u8 {
+    fn from(o: Interupt) -> u8 {
+        match o {
+            Interupt::H09 => 1,
+            Interupt::H10 => 2,
+            Interupt::H20 => 3,
+        }
+    }
+}
+
+impl FromStr for Interupt {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "09H" => Ok(Interupt::H09),
+            "10H" => Ok(Interupt::H10),
+            "20H" => Ok(Interupt::H20),
+            &_ => Err(Self::Err::ParseInteruptError(s.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+pub enum Operands {
+    V0,
+    // - 2
+    V1(u8, u8),
+    // AX
+    V2(Register),
+    // 09H
+    V3(Interupt),
+    // [p1, p2, p3]
+    V4(u8, u8, u8),
+    // AX, 2
+    V5(Register, u8),
+    // AX, BX
+    V6(Register, Register),
+}
+
+impl From<Operands> for Vec<u8> {
+    fn from(o: Operands) -> Vec<u8> {
+        match o {
+            Operands::V0 => vec![0, 0, 0, 0],
+            Operands::V1(sing, num) => vec![1, sing, num, 0],
+            Operands::V2(register) => vec![2, register.into(), 0, 0],
+            Operands::V3(interupt) => vec![3, interupt.into(), 0, 0],
+            Operands::V4(p1, p2, p3) => vec![4, p1, p2, p3],
+            Operands::V5(register, num) => vec![5, register.into(), num, 0],
+            Operands::V6(register1, register2) => vec![6, register1.into(), register2.into(), 0],
+        }
+    }
+}
+
+impl From<&[u8]> for Operands {
+    fn from(bytes: &[u8]) -> Operands {
+        match bytes[0] {
+            0 => Operands::V0,
+            1 => Operands::V1(bytes[1], bytes[2]),
+            2 => Operands::V2(Register::from(bytes[1])),
+            3 => Operands::V3(Interupt::from(bytes[1])),
+            4 => Operands::V4(bytes[1],bytes[2], bytes[3]),
+            5 => Operands::V5(Register::from(bytes[1]), bytes[2]),
+            6 => Operands::V6(Register::from(bytes[1]), Register::from(bytes[2])),
+            _ => todo!(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Instruction {
     pub operation: Operation,
-    pub operands: Vec<String>,
+    pub operands: Operands,
 }
 
 impl From<&[u8]> for Instruction {
     fn from(bytes: &[u8]) -> Self {
-        let operands_len = bytes[1];
-        let mut operands: Vec<String> = vec![];
-
-        let mut i = 2;
-        // Read the rest of the bytes and converts them to String and store them on a list
-        while i < operands_len {
-            let len = bytes[i as usize];
-            operands.push(
-                std::str::from_utf8(&bytes[(i + 1) as usize..(i + 1 + len) as usize])
-                    .unwrap()
-                    .to_string(),
-            );
-            i += len + 1;
-        }
-
         Self {
             // The operand is stored on the first byte
             operation: Operation::from(bytes[0]),
-            operands,
+            operands: Operands::from(&bytes[1..]),
         }
     }
 }
@@ -170,13 +288,9 @@ impl From<&[u8]> for Instruction {
 impl From<Instruction> for Vec<u8> {
     fn from(i: Instruction) -> Vec<u8> {
         let mut bytes: Vec<u8> = vec![];
+        let mut operands: Vec<u8> = i.operands.into();
         bytes.push(i.operation.into());
-        for operand in i.operands {
-            let operand_bytes = operand.as_bytes();
-            bytes.push(operand_bytes.len() as u8);
-            let _ = bytes.write(operand_bytes);
-        }
-        bytes.insert(1, (bytes.len() + 1) as u8);
+        bytes.append(&mut operands);
         bytes
     }
 }
@@ -226,7 +340,7 @@ mod tests {
     fn from_into_instruction() {
         let instruction = Instruction {
             operation: Operation::MOV,
-            operands: vec!["AX".to_string(), "5".to_string()],
+            operands: Operands::V5(Register::AX, 5),
         };
 
         let instruction_u8: Vec<u8> = instruction.clone().into();
@@ -240,11 +354,11 @@ mod tests {
         let instructions = vec![
             Instruction {
                 operation: Operation::MOV,
-                operands: vec!["AX".to_string(), "5".to_string()],
+                operands: Operands::V5(Register::AX, 5),
             },
             Instruction {
                 operation: Operation::MOV,
-                operands: vec!["AX".to_string(), "5".to_string()],
+                operands: Operands::V5(Register::AX, 5),
             },
         ];
 
