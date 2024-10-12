@@ -426,20 +426,58 @@ impl Emulator {
                             }
                         }
                     }
-                    _ => {}
+                    Operation::PARAM => {
+                        if let Operands::V4(p1, p2, p3) = instruction.operands {
+                            if p1 != 0 {
+                                self.memory.data[self.cpu.sp] = p1;
+                                self.cpu.sp += 1;
+                            }
+                            if p2 != 0 {
+                                self.memory.data[self.cpu.sp] = p2;
+                                self.cpu.sp += 1;
+                            }
+                            if p3 != 0 {
+                                self.memory.data[self.cpu.sp] = p3;
+                                self.cpu.sp += 1;
+                            }
+                        }
+                    }
+                    Operation::CMP => {
+                        if let Operands::V6(r1, r2) = instruction.operands {
+                            match r1 {
+                                Register::AX => match r2 {
+                                    Register::BX => self.cpu.z = self.cpu.ax == self.cpu.bx,
+                                    Register::CX => self.cpu.z = self.cpu.ax == self.cpu.cx,
+                                    Register::DX => self.cpu.z = self.cpu.ax == self.cpu.dx,
+                                    _ => {}
+                                },
+                                Register::BX => match r2 {
+                                    Register::AX => self.cpu.z = self.cpu.bx == self.cpu.ax,
+                                    Register::CX => self.cpu.z = self.cpu.bx == self.cpu.cx,
+                                    Register::DX => self.cpu.z = self.cpu.bx == self.cpu.dx,
+                                    _ => {}
+                                },
+                                Register::CX => match r2 {
+                                    Register::AX => self.cpu.z = self.cpu.cx == self.cpu.ax,
+                                    Register::BX => self.cpu.z = self.cpu.cx == self.cpu.bx,
+                                    Register::DX => self.cpu.z = self.cpu.cx == self.cpu.dx,
+                                    _ => {}
+                                },
+                                Register::DX => match r2 {
+                                    Register::AX => self.cpu.z = self.cpu.dx == self.cpu.ax,
+                                    Register::BX => self.cpu.z = self.cpu.dx == self.cpu.bx,
+                                    Register::CX => self.cpu.z = self.cpu.dx == self.cpu.cx,
+                                    _ => {}
+                                },
+                            }
+                        }
+                    }
                 }
 
                 self.cpu.pc += 6;
                 Task::none()
             }
         }
-    }
-
-    fn subscription(&self) -> Subscription<Message> {
-        if self.running {
-            return time::every(Duration::from_millis(1000)).map(|_| Message::Tick);
-        }
-        Subscription::none()
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
@@ -499,6 +537,13 @@ impl Emulator {
         .width(iced::Length::Fill)
         .height(iced::Length::Fill)
         .into()
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        if self.running {
+            return time::every(Duration::from_millis(1000)).map(|_| Message::Tick);
+        }
+        Subscription::none()
     }
 }
 
