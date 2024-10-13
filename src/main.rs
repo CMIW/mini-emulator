@@ -1,5 +1,5 @@
 use iced::widget::Container;
-use iced::widget::{button, column, container, rich_text, row, scrollable, span, text};
+use iced::widget::{button, column, container, rich_text, row, scrollable, span, text, text_input};
 use iced::{color, font, time, widget};
 use iced::{Element, Font, Subscription, Task};
 use std::fs::File;
@@ -19,10 +19,11 @@ fn main() -> iced::Result {
 
 #[derive(Default)]
 struct Emulator {
-    storage: Storage,
-    memory: Memory,
     cpu: CPU,
     running: bool,
+    memory: Memory,
+    storage: Storage,
+    display_content: String,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +36,7 @@ enum Message {
     StoreFiles(Result<Vec<(String, Vec<u8>)>, Error>),
     // (pcb_id, address, size)
     Distpacher((usize, usize, usize)),
+    Terminated,
 }
 
 impl Emulator {
@@ -64,6 +66,7 @@ impl Emulator {
                 memory: Memory::new(config.memory, config.os_segment),
                 cpu: CPU::new(),
                 running: false,
+                display_content: "".to_string(),
             },
             Task::none(),
         )
@@ -210,10 +213,24 @@ impl Emulator {
                 self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
                 Task::none()
             }
+            Message::Terminated => {
+                if let Some(mut pcb) = self.memory.running_process() {
+                    pcb.process_state = ProcessState::Terminated;
+                    println!("{:#?}", pcb);
+                    //let bytes: Vec<u8> = pcb.into();
+                    //self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
+                    // What to do at the end of live of a process??
+                };
+                Task::none()
+            }
             Message::Tick => {
+                let bytes = &self.memory.data[self.cpu.pc + 1..self.cpu.pc + 1 + 5];
+                if bytes[0] == 0 {
+                    self.running = false;
+                    return Task::done(Message::Terminated);
+                }
                 // Fetch
-                let instruction =
-                    Instruction::from(&self.memory.data[self.cpu.pc + 1..self.cpu.pc + 1 + 5]);
+                let instruction = Instruction::from(bytes);
                 //println!("{:?}", Instruction::from(&self.memory.data[self.cpu.pc+1..self.cpu.pc+1 + 5]));
                 self.cpu.ir = Some(instruction.operation);
                 match instruction.operation {
@@ -344,18 +361,22 @@ impl Emulator {
                     }
                     Operation::INT => {
                         if let Operands::V3(i) = instruction.operands {
+                            println!("{:?}", i);
                             match i {
-                                Interupt::H09 => self.cpu.ac = self.cpu.ax,
-                                Interupt::H10 => todo!(),
-                                Interupt::H20 => todo!(),
+                                Interupt::H20 => {
+                                    self.running = false;
+                                    return Task::done(Message::Terminated);
+                                }
+                                Interupt::H10 => self.display_content = self.cpu.dx.to_string(),
+                                Interupt::H09 => todo!(),
                             }
                         }
                     }
                     Operation::JMP => {
                         if let Operands::V1(s, num) = instruction.operands {
                             match s {
-                                0 => self.cpu.pc += (6 * num) as usize,
-                                1 => self.cpu.pc -= (6 * num) as usize,
+                                0 => self.cpu.pc += (7 * num) as usize,
+                                1 => self.cpu.pc -= (7 * num) as usize,
                                 _ => {}
                             }
                         }
@@ -364,8 +385,8 @@ impl Emulator {
                         if self.cpu.z {
                             if let Operands::V1(s, num) = instruction.operands {
                                 match s {
-                                    0 => self.cpu.pc += (6 * num) as usize,
-                                    1 => self.cpu.pc -= (6 * num) as usize,
+                                    0 => self.cpu.pc += (7 * num) as usize,
+                                    1 => self.cpu.pc -= (7 * num) as usize,
                                     _ => {}
                                 }
                             }
@@ -375,8 +396,8 @@ impl Emulator {
                         if !self.cpu.z {
                             if let Operands::V1(s, num) = instruction.operands {
                                 match s {
-                                    0 => self.cpu.pc += (6 * num) as usize,
-                                    1 => self.cpu.pc -= (6 * num) as usize,
+                                    0 => self.cpu.pc += (7 * num) as usize,
+                                    1 => self.cpu.pc -= (7 * num) as usize,
                                     _ => {}
                                 }
                             }
@@ -526,7 +547,12 @@ impl Emulator {
                     text("Storage"),
                     storage_display
                 ],
-                column![text("CPU"), cpu_display],
+                column![
+                    text("CPU"),
+                    cpu_display,
+                    text("Display"),
+                    text_input(":$ ", &self.display_content).width(115)
+                ],
                 widget::Space::new(iced::Length::Fill, iced::Length::Fill)
             ]
             .spacing(40)
