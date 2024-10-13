@@ -1,4 +1,4 @@
-use crate::emulator::PCB;
+use crate::emulator::{ProcessState, PCB};
 use crate::error::Error;
 
 #[derive(Debug, Default)]
@@ -90,5 +90,15 @@ impl Memory {
             Some((id, _, _)) => *id,
             None => 0,
         }
+    }
+
+    pub fn running_process(&self) -> Option<PCB> {
+        for (_, address, data_size) in &self.pcb_table {
+            let pcb = PCB::from(&self.data[*address..*address + *data_size]);
+            if pcb.process_state == ProcessState::Running {
+                return Some(pcb);
+            }
+        }
+        None
     }
 }
