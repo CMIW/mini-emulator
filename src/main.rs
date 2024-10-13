@@ -1,7 +1,7 @@
 use iced::widget::Container;
 use iced::widget::{button, column, container, rich_text, row, scrollable, span, text, text_input};
 use iced::{color, font, time, widget};
-use iced::{Element, Font, Subscription, Task};
+use iced::{Element, Font, Subscription, Task, Theme};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -14,16 +14,24 @@ use proyecto_1::{emulator::*, parser::*};
 fn main() -> iced::Result {
     iced::application("Emulator", Emulator::update, Emulator::view)
         .subscription(Emulator::subscription)
+        .theme(Emulator::theme)
         .run_with(Emulator::new)
 }
 
 #[derive(Default)]
 struct Emulator {
     cpu: CPU,
-    running: bool,
+    mode: Option<Mode>,
     memory: Memory,
     storage: Storage,
     display_content: String,
+    theme: Theme,
+}
+
+#[derive(PartialEq)]
+enum Mode {
+    Manual,
+    Automatic,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +45,7 @@ enum Message {
     // (pcb_id, address, size)
     Distpacher((usize, usize, usize)),
     Terminated,
+    ChangeMode,
 }
 
 impl Emulator {
@@ -65,8 +74,9 @@ impl Emulator {
                 storage: Storage::new(config.storage),
                 memory: Memory::new(config.memory, config.os_segment),
                 cpu: CPU::new(),
-                running: false,
+                mode: None,
                 display_content: "".to_string(),
+                theme: iced::Theme::Dracula,
             },
             Task::none(),
         )
@@ -116,6 +126,14 @@ impl Emulator {
                 Task::perform(dialog, Message::DialogResult)
             }
             Message::DialogResult(_result) => Task::none(),
+            Message::ChangeMode => {
+                if self.mode == Some(Mode::Manual) {
+                    self.mode = Some(Mode::Automatic);
+                } else {
+                    self.mode = Some(Mode::Manual);
+                }
+                Task::none()
+            },
             // The Scheduler of the OS it will select the next process to execute and send it to the distpacher
             Message::Scheduler => {
                 // No PCB has been created yet so we need create 5
@@ -206,7 +224,7 @@ impl Emulator {
                 self.cpu.sp = pcb.sp;
                 self.cpu.ir = pcb.ir;
                 self.cpu.z = pcb.z;
-                self.running = true;
+                self.mode = Some(Mode::Manual);
 
                 pcb.process_state = ProcessState::Running;
                 let bytes: Vec<u8> = pcb.into();
@@ -226,12 +244,12 @@ impl Emulator {
             Message::Tick => {
                 let bytes = &self.memory.data[self.cpu.pc + 1..self.cpu.pc + 1 + 5];
                 if bytes[0] == 0 {
-                    self.running = false;
+                    self.mode = None;
                     return Task::done(Message::Terminated);
                 }
                 // Fetch
                 let instruction = Instruction::from(bytes);
-                //println!("{:?}", Instruction::from(&self.memory.data[self.cpu.pc+1..self.cpu.pc+1 + 5]));
+
                 self.cpu.ir = Some(instruction.operation);
                 match instruction.operation {
                     Operation::LOAD => {
@@ -361,10 +379,9 @@ impl Emulator {
                     }
                     Operation::INT => {
                         if let Operands::V3(i) = instruction.operands {
-                            println!("{:?}", i);
                             match i {
                                 Interupt::H20 => {
-                                    self.running = false;
+                                    self.mode = None;
                                     return Task::done(Message::Terminated);
                                 }
                                 Interupt::H10 => self.display_content = self.cpu.dx.to_string(),
@@ -502,12 +519,23 @@ impl Emulator {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
+        let mut play_button = button("Play/Pause");
+        let mut next_button = button("Next");
+        if self.mode == Some(Mode::Manual) {
+            next_button = next_button.on_press(Message::Tick);
+        }
+        if self.mode.is_some() {
+            play_button = play_button.on_press(Message::ChangeMode);
+        }
         // Menu bar
         let menu_bar = row![
             button("File").on_press(Message::OpenFile),
+            play_button,
+            next_button,
             widget::Space::new(iced::Length::Shrink, iced::Length::Fill)
         ]
         .height(40)
+        .spacing(5)
         .padding([5, 10]);
         let mut files = column![].padding([5, 10]);
 
@@ -540,7 +568,7 @@ impl Emulator {
         widget::container(column![
             menu_bar,
             row![
-                files_display,
+                column![text("Files"), files_display],
                 column![
                     text("Memory"),
                     memory_display,
@@ -566,10 +594,14 @@ impl Emulator {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        if self.running {
+        if self.mode == Some(Mode::Automatic) {
             return time::every(Duration::from_millis(1000)).map(|_| Message::Tick);
         }
         Subscription::none()
+    }
+
+    fn theme(&self) -> Theme {
+        self.theme.clone()
     }
 }
 
@@ -599,7 +631,7 @@ fn cpu_display(cpu: &CPU) -> Container<'static, Message> {
 
 fn register_dispay(r_name: &str, r: String) -> Element<'_, Message> {
     rich_text(vec![
-        span(r_name).color(color!(0xff0000)).font(Font {
+        span(r_name).color(color!(0xff79c6)).font(Font {
             weight: font::Weight::Bold,
             ..Font::default()
         }),
@@ -615,7 +647,7 @@ fn binary_display(bytes: &[u8]) -> Container<'static, Message> {
     let mut column = column![].padding([5, 10]);
     for (index, data) in bytes.chunks(8).enumerate() {
         let mut spans = vec![span(format!("{:02X}", index))
-            .color(color!(0xff0000))
+            .color(color!(0x9afcb3))
             .font(Font {
                 weight: font::Weight::Bold,
                 ..Font::default()
