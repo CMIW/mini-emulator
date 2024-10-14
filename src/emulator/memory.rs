@@ -92,11 +92,11 @@ impl Memory {
         }
     }
 
-    pub fn running_process(&self) -> Option<PCB> {
-        for (_, address, data_size) in &self.pcb_table {
+    pub fn running_process(&self) -> Option<((usize, usize, usize), PCB)> {
+        for (id, address, data_size) in &self.pcb_table {
             let pcb = PCB::from(&self.data[*address..*address + *data_size]);
             if pcb.process_state == ProcessState::Running {
-                return Some(pcb);
+                return Some(((*id, *address, *data_size), pcb));
             }
         }
         None

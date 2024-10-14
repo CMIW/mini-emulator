@@ -25,6 +25,7 @@ struct Emulator {
     memory: Memory,
     storage: Storage,
     display_content: String,
+    waiting_queue: Vec<(usize, usize, usize)>,
     theme: Theme,
 }
 
@@ -37,6 +38,9 @@ enum Mode {
 #[derive(Debug, Clone)]
 enum Message {
     Tick,
+    Input(String),
+    Blocked,
+    Unblock,
     OpenFile,
     Scheduler,
     DialogResult(rfd::MessageDialogResult),
@@ -77,6 +81,7 @@ impl Emulator {
                 mode: None,
                 display_content: "".to_string(),
                 theme: iced::Theme::Dracula,
+                waiting_queue: vec![],
             },
             Task::none(),
         )
@@ -224,7 +229,9 @@ impl Emulator {
                 self.cpu.sp = pcb.sp;
                 self.cpu.ir = pcb.ir;
                 self.cpu.z = pcb.z;
-                self.mode = Some(Mode::Manual);
+                if !self.mode.is_some() {
+                    self.mode = Some(Mode::Manual);
+                }
 
                 pcb.process_state = ProcessState::Running;
                 let bytes: Vec<u8> = pcb.into();
@@ -232,13 +239,67 @@ impl Emulator {
                 Task::none()
             }
             Message::Terminated => {
-                if let Some(mut pcb) = self.memory.running_process() {
+                if let Some(((_, address, size), mut pcb)) = self.memory.running_process() {
                     pcb.process_state = ProcessState::Terminated;
+                    pcb.ax = self.cpu.ax;
+                    pcb.bx = self.cpu.bx;
+                    pcb.cx = self.cpu.cx;
+                    pcb.dx = self.cpu.dx;
+                    pcb.ac = self.cpu.ac;
+                    pcb.pc = self.cpu.pc;
+                    pcb.sp = self.cpu.sp;
+                    pcb.ir = self.cpu.ir;
+                    pcb.z = self.cpu.z;
                     println!("{:#?}", pcb);
-                    //let bytes: Vec<u8> = pcb.into();
-                    //self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
+                    let bytes: Vec<u8> = pcb.into();
+                    self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
                     // What to do at the end of live of a process??
                 };
+                Task::none()
+            }
+            Message::Blocked => {
+                if let Some(((id, address, size), mut pcb)) = self.memory.running_process() {
+                    pcb.process_state = ProcessState::Blocked;
+                    pcb.ax = self.cpu.ax;
+                    pcb.bx = self.cpu.bx;
+                    pcb.cx = self.cpu.cx;
+                    pcb.dx = self.cpu.dx;
+                    pcb.ac = self.cpu.ac;
+                    pcb.pc = self.cpu.pc;
+                    pcb.sp = self.cpu.sp;
+                    pcb.ir = self.cpu.ir;
+                    pcb.z = self.cpu.z;
+
+                    let bytes: Vec<u8> = pcb.into();
+                    self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
+                    self.waiting_queue.push((id, address, size));
+                };
+                Task::none()
+            }
+            Message::Input(mut input) => {
+                input.retain(|c| c.is_numeric());
+                if input.len() <= 3 {
+                    self.display_content = input;
+                }
+                Task::none()
+            }
+            Message::Unblock => {
+                if let Some((p_id, address, size)) = self.waiting_queue.first() {
+                    if let Ok(num) = self.display_content.parse::<u8>() {
+                        let mut pcb = PCB::from(&self.memory.data[*address..*address + *size]);
+
+                        pcb.dx = num;
+                        pcb.process_state = ProcessState::Ready;
+                        pcb.pc += 6;
+
+                        let bytes: Vec<u8> = pcb.into();
+                        self.memory.data[*address..*address + *size].copy_from_slice(&bytes[..]);
+
+                        self.waiting_queue.remove(0);
+
+                        return Task::done(Message::Scheduler);
+                    }
+                }
                 Task::none()
             }
             Message::Tick => {
@@ -385,7 +446,10 @@ impl Emulator {
                                     return Task::done(Message::Terminated);
                                 }
                                 Interupt::H10 => self.display_content = self.cpu.dx.to_string(),
-                                Interupt::H09 => todo!(),
+                                Interupt::H09 => {
+                                    self.mode = None;
+                                    return Task::done(Message::Blocked);
+                                }
                             }
                         }
                     }
@@ -565,6 +629,11 @@ impl Emulator {
         // Display CPU content
         let cpu_display = cpu_display(&self.cpu);
 
+        let mut display = text_input(":$ ", &self.display_content).width(115);
+        if !self.waiting_queue.is_empty() {
+            display = display.on_input(|input|Message::Input(input)).on_submit(Message::Unblock);
+        }
+
         widget::container(column![
             menu_bar,
             row![
@@ -579,7 +648,7 @@ impl Emulator {
                     text("CPU"),
                     cpu_display,
                     text("Display"),
-                    text_input(":$ ", &self.display_content).width(115)
+                    display
                 ],
                 widget::Space::new(iced::Length::Fill, iced::Length::Fill)
             ]
