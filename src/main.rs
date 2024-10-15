@@ -26,6 +26,7 @@ struct Emulator {
     storage: Storage,
     display_content: String,
     waiting_queue: Vec<(usize, usize, usize)>,
+    loaded_files: Vec<(String, usize)>,
     theme: Theme,
 }
 
@@ -82,6 +83,7 @@ impl Emulator {
                 display_content: "".to_string(),
                 theme: iced::Theme::Dracula,
                 waiting_queue: vec![],
+                loaded_files: vec![],
             },
             Task::none(),
         )
@@ -138,17 +140,22 @@ impl Emulator {
                     self.mode = Some(Mode::Manual);
                 }
                 Task::none()
-            },
+            }
             // The Scheduler of the OS it will select the next process to execute and send it to the distpacher
             Message::Scheduler => {
-                // No PCB has been created yet so we need create 5
-                // Currently just creating one
-                if self.memory.pcb_table.is_empty() {
-                    // Check the list of stored files for the first one
-                    if !self.storage.used.is_empty() {
-                        // Parse the first stored file
-                        let (_, address, data_size) = self.storage.used.first().unwrap();
-
+                // Before selecting the process to execute we have to make sure that PCBs have been created
+                // Check the list of stored files
+                for (file_name, address, data_size) in &self.storage.used {
+                    // We only load 5 files at a time
+                    if self.memory.pcb_table.len() == 5 {
+                        break;
+                    }
+                    if self.loaded_files.iter().any(|x| x.0 == *file_name) {
+                        // File already loaded , so we can ignore it
+                    }
+                    // Load only files that have not already being loaded
+                    else {
+                        // Parse the file into to list of instructions
                         let instructions = match read_file(
                             &self.storage.data[*address..(*address + *data_size)],
                         ) {
@@ -172,50 +179,49 @@ impl Emulator {
                                     .chain(Task::done(Message::Scheduler));
                             }
                         };
+                        // Create the PCB only if there is enough space in memory
+                        if instructions.len() + 5 <= self.memory.free_size() {
+                            // Create new PCB
+                            let next_id = self.memory.last_pcb_id() + 1;
+                            let mut new_pcb = PCB::new(next_id);
+                            // Store the instructions on memory
+                            let serialized = to_bytes(instructions);
+                            let size = &serialized.len();
+                            let (address, size) = match self.memory.store(serialized, *size) {
+                                Ok(address) => address,
+                                // No more memory to store the instructions
+                                Err(_) => {
+                                    todo!();
+                                }
+                            };
+                            new_pcb.code_segment(address, size);
 
-                        // Create new PCB
-                        let next_id = self.memory.last_pcb_id() + 1;
-                        let mut new_pcb = PCB::new(next_id);
-                        // Store the instructions on memory
-                        let serialized = to_bytes(instructions);
-                        let size = &serialized.len();
-                        let (address, size) = match self.memory.store(serialized, *size) {
-                            Ok(address) => address,
-                            // No more memory to store the instructions
-                            Err(_) => {
-                                todo!();
+                            // Allocate the stack memory
+                            let (address, size) = match self.memory.store(vec![0; 5], 5) {
+                                Ok(address) => address,
+                                // No more memory to allocate the stack
+                                Err(_) => {
+                                    todo!();
+                                }
+                            };
+                            new_pcb.stack_segment(address, size);
+
+                            match self.memory.store_pcb(new_pcb) {
+                                Ok(_) => (),
+                                // No more memory to store PCBs
+                                Err(_) => todo!(),
                             }
-                        };
-                        new_pcb.code_segment(address, size);
 
-                        // Allocate the stack memory
-                        let (address, size) = match self.memory.store(vec![0; 5], 5) {
-                            Ok(address) => address,
-                            // No more memory to allocate the stack
-                            Err(_) => {
-                                todo!();
-                            }
-                        };
-                        new_pcb.stack_segment(address, size);
-
-                        match self.memory.store_pcb(new_pcb) {
-                            Ok(_) => (),
-                            // No more memory to store PCBs
-                            Err(_) => todo!(),
+                            self.loaded_files.push((file_name.to_string(), new_pcb.id));
                         }
-                        Task::done(Message::Scheduler)
-                    }
-                    // No stored files
-                    else {
-                        // Remind the user to add files?
-                        todo!();
                     }
                 }
                 // Select the pcb from the table and send to distpacher
-                else {
-                    // Aqui irian los algorithmos del scheduler
-                    let pcb = self.memory.pcb_table.first().unwrap();
+                // Aqui irian los algorithmos del scheduler
+                if let Some(pcb) = self.memory.pcb_table.first() {
                     Task::done(Message::Distpacher(*pcb))
+                } else {
+                    Task::none()
                 }
             }
             Message::Distpacher((_pcb_id, address, size)) => {
@@ -229,7 +235,7 @@ impl Emulator {
                 self.cpu.sp = pcb.sp;
                 self.cpu.ir = pcb.ir;
                 self.cpu.z = pcb.z;
-                if !self.mode.is_some() {
+                if self.mode.is_none() {
                     self.mode = Some(Mode::Manual);
                 }
 
@@ -239,7 +245,7 @@ impl Emulator {
                 Task::none()
             }
             Message::Terminated => {
-                if let Some(((_, address, size), mut pcb)) = self.memory.running_process() {
+                if let Some(((pcb_id, address, size), mut pcb)) = self.memory.running_process() {
                     pcb.process_state = ProcessState::Terminated;
                     pcb.ax = self.cpu.ax;
                     pcb.bx = self.cpu.bx;
@@ -250,12 +256,14 @@ impl Emulator {
                     pcb.sp = self.cpu.sp;
                     pcb.ir = self.cpu.ir;
                     pcb.z = self.cpu.z;
-                    println!("{:#?}", pcb);
+
                     let bytes: Vec<u8> = pcb.into();
                     self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
-                    // What to do at the end of live of a process??
+                    // Remove from pcb_table
+                    self.memory.pcb_table.retain(|x| x.0 != pcb_id);
+                    // Free memory
                 };
-                Task::none()
+                Task::done(Message::Scheduler)
             }
             Message::Blocked => {
                 if let Some(((id, address, size), mut pcb)) = self.memory.running_process() {
@@ -284,7 +292,7 @@ impl Emulator {
                 Task::none()
             }
             Message::Unblock => {
-                if let Some((p_id, address, size)) = self.waiting_queue.first() {
+                if let Some((_, address, size)) = self.waiting_queue.first() {
                     if let Ok(num) = self.display_content.parse::<u8>() {
                         let mut pcb = PCB::from(&self.memory.data[*address..*address + *size]);
 
@@ -311,6 +319,7 @@ impl Emulator {
                 // Fetch
                 let instruction = Instruction::from(bytes);
 
+                // Decode and Execute
                 self.cpu.ir = Some(instruction.operation);
                 match instruction.operation {
                     Operation::LOAD => {
@@ -447,7 +456,7 @@ impl Emulator {
                                 }
                                 Interupt::H10 => self.display_content = self.cpu.dx.to_string(),
                                 Interupt::H09 => {
-                                    self.mode = None;
+                                    //self.mode = None;
                                     return Task::done(Message::Blocked);
                                 }
                             }
@@ -604,14 +613,29 @@ impl Emulator {
         let mut files = column![].padding([5, 10]);
 
         for (index, (file_name, _, _)) in self.storage.used.iter().enumerate() {
-            files = files.push(rich_text([
-                span(index).font(Font {
-                    weight: font::Weight::Bold,
-                    ..Font::default()
-                }),
-                span(" "),
-                span(file_name),
-            ]));
+            if let Some((_, pcb)) = self.memory.running_process() {
+                if let Some((file, _)) = self.loaded_files.iter().find(|x| x.1 == pcb.id) {
+                    if file_name == file {
+                        files = files.push(rich_text([
+                            span(index).font(Font {
+                                weight: font::Weight::Bold,
+                                ..Font::default()
+                            }),
+                            span(" "),
+                            span(file).color(color!(0xff79c6)),
+                        ]));
+                    } else {
+                        files = files.push(rich_text([
+                            span(index).font(Font {
+                                weight: font::Weight::Bold,
+                                ..Font::default()
+                            }),
+                            span(" "),
+                            span(file_name),
+                        ]));
+                    }
+                }
+            };
         }
 
         // Show the list of files
@@ -631,8 +655,45 @@ impl Emulator {
 
         let mut display = text_input(":$ ", &self.display_content).width(115);
         if !self.waiting_queue.is_empty() {
-            display = display.on_input(|input|Message::Input(input)).on_submit(Message::Unblock);
+            display = display.on_input(Message::Input).on_submit(Message::Unblock);
         }
+
+        let pcb_display = if let Some((_, pcb)) = self.memory.running_process() {
+            println!("{:?}", &pcb);
+            container(
+                column![
+                    text(format!("ID: {}", &pcb.id)),
+                    text("Code Segment"),
+                    row![
+                        text(format!("Address: {}", &pcb.code_segment)),
+                        text(format!("Size: {}", &pcb.code_segment_size)),
+                    ]
+                    .spacing(5),
+                    row![
+                        text(format!("Stack Segment: {}", &pcb.stack_segment)),
+                        text(format!("Size: {}", &pcb.stack_segment_size)),
+                    ]
+                    .spacing(5),
+                    text(format!("Process State: {:?}", &pcb.process_state)),
+                    text(format!("Priority: {}", &pcb.priority)),
+                    row![
+                        text(format!("AX: {}", &pcb.ax)),
+                        text(format!("BX: {}", &pcb.bx)),
+                        text(format!("CX: {}", &pcb.cx)),
+                        text(format!("DX: {}", &pcb.dx)),
+                        text(format!("AC: {}", &pcb.ac)),
+                    ]
+                    .spacing(5),
+                    text(format!("PC: {}", &pcb.pc)),
+                    text(format!("SP: {}", &pcb.sp)),
+                    text(format!("IR: {:?}", &pcb.ir)),
+                    text(format!("Z: {}", &pcb.z))
+                ]
+                .spacing(5),
+            )
+        } else {
+            container("")
+        };
 
         widget::container(column![
             menu_bar,
@@ -648,7 +709,9 @@ impl Emulator {
                     text("CPU"),
                     cpu_display,
                     text("Display"),
-                    display
+                    display,
+                    text("Current PCB"),
+                    pcb_display,
                 ],
                 widget::Space::new(iced::Length::Fill, iced::Length::Fill)
             ]
