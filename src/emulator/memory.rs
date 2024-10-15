@@ -74,9 +74,9 @@ impl Memory {
 
             let next_address = address + data_size;
             let available_space = self.os_segment_size - next_address;
-
+            //println!("available_space {} bytes {}", available_space, bytes.len());
             if available_space > bytes.len() {
-                self.data[next_address..bytes.len()].copy_from_slice(&bytes[..]);
+                self.data[next_address..next_address + bytes.len()].copy_from_slice(&bytes[..]);
                 self.pcb_table.push((pcb.id, next_address, bytes.len()));
             } else {
                 return Err(Error::NotEnoughOsMemory);
@@ -100,5 +100,12 @@ impl Memory {
             }
         }
         None
+    }
+
+    pub fn free_size(&self) -> usize {
+        let mut data = self.data.clone();
+        data.retain(|x| *x == 0);
+
+        data.len().saturating_sub(self.os_segment_size)
     }
 }
