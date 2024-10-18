@@ -1,5 +1,5 @@
 use iced::widget::Container;
-use iced::widget::{button, column, container, rich_text, row, scrollable, span, text, text_input};
+use iced::widget::{pick_list, button, column, container, rich_text, row, scrollable, span, text, text_input};
 use iced::{color, font, time, widget};
 use iced::{Element, Font, Subscription, Task, Theme};
 use std::fs::File;
@@ -24,6 +24,7 @@ struct Emulator {
     mode: Option<Mode>,
     memory: Memory,
     storage: Storage,
+    config: Config,
     display_content: String,
     waiting_queue: Vec<(usize, usize, usize)>,
     loaded_files: Vec<(String, usize)>,
@@ -51,6 +52,7 @@ enum Message {
     Distpacher((usize, usize, usize)),
     Terminated,
     ChangeMode,
+    SchedulerSelected(Scheduler),
 }
 
 impl Emulator {
@@ -84,6 +86,7 @@ impl Emulator {
                 theme: iced::Theme::Dracula,
                 waiting_queue: vec![],
                 loaded_files: vec![],
+                config,
             },
             Task::none(),
         )
@@ -588,12 +591,25 @@ impl Emulator {
                 self.cpu.pc += 6;
                 Task::none()
             }
+            Message::SchedulerSelected(scheduler) => {
+                if self.mode.is_none() {
+                    self.config.scheduler = Some(scheduler);
+                }
+                Task::none()
+            }
         }
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
         let mut play_button = button("Play/Pause");
         let mut next_button = button("Next");
+        /*let mut scheduler_pick_list = pick_list([
+            Scheduler::FCFS,
+            Scheduler::SRT,
+            Scheduler::SJF,
+            Scheduler::RR,
+            Scheduler::HRRN,
+            ], Scheduler::FCFS, Message::SchedulerSelected)*/
         if self.mode == Some(Mode::Manual) {
             next_button = next_button.on_press(Message::Tick);
         }
@@ -605,6 +621,13 @@ impl Emulator {
             button("File").on_press(Message::OpenFile),
             play_button,
             next_button,
+            pick_list([
+                Scheduler::FCFS,
+                Scheduler::SRT,
+                Scheduler::SJF,
+                Scheduler::RR,
+                Scheduler::HRRN,
+                ], self.config.scheduler, Message::SchedulerSelected),
             widget::Space::new(iced::Length::Shrink, iced::Length::Fill)
         ]
         .height(40)

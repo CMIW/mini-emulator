@@ -3,5 +3,6 @@
     "storage": 1000,
     "os_segment": 1000,
     "user_segment": 1000,
-    "virtual_memory": 600
+    "virtual_memory": 600,
+    "cpu_quantity": 4,
 }
