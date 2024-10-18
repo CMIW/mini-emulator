@@ -1,6 +1,6 @@
+use crate::emulator::Scheduler;
 use serde::{Deserialize, Serialize};
 use std::default::Default;
-use crate::emulator::Scheduler;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct Config {
@@ -40,7 +40,7 @@ impl Default for Config {
             user_segment: 100,
             virtual_memory: 64,
             scheduler: Some(Scheduler::FCFS),
-            cpu_quantity: 1
+            cpu_quantity: 1,
         }
     }
 }

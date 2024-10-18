@@ -1,5 +1,7 @@
 use iced::widget::Container;
-use iced::widget::{pick_list, button, column, container, rich_text, row, scrollable, span, text, text_input};
+use iced::widget::{
+    button, column, container, pick_list, rich_text, row, scrollable, span, text, text_input,
+};
 use iced::{color, font, time, widget};
 use iced::{Element, Font, Subscription, Task, Theme};
 use std::fs::File;
@@ -26,6 +28,7 @@ struct Emulator {
     storage: Storage,
     config: Config,
     display_content: String,
+    // List of processes waiting because of an interupt
     waiting_queue: Vec<(usize, usize, usize)>,
     loaded_files: Vec<(String, usize)>,
     theme: Theme,
@@ -144,80 +147,10 @@ impl Emulator {
                 }
                 Task::none()
             }
-            // The Scheduler of the OS it will select the next process to execute and send it to the distpacher
+            // The Scheduler of the OS, it will select the next process to execute and send it to the distpacher
             Message::Scheduler => {
-                // Before selecting the process to execute we have to make sure that PCBs have been created
-                // Check the list of stored files
-                for (file_name, address, data_size) in &self.storage.used {
-                    // We only load 5 files at a time
-                    if self.memory.pcb_table.len() == 5 {
-                        break;
-                    }
-                    if self.loaded_files.iter().any(|x| x.0 == *file_name) {
-                        // File already loaded , so we can ignore it
-                    }
-                    // Load only files that have not already being loaded
-                    else {
-                        // Parse the file into to list of instructions
-                        let instructions = match read_file(
-                            &self.storage.data[*address..(*address + *data_size)],
-                        ) {
-                            Ok(instructions) => instructions,
-                            // Parsing Error
-                            Err(error) => {
-                                // Remove file from memory
-                                self.storage.data[*address..*address + *data_size]
-                                    .copy_from_slice(&vec![0; *data_size]);
-                                self.storage.freed.push(self.storage.used.remove(0));
-
-                                // Display the error to the user
-                                let dialog = rfd::AsyncMessageDialog::new()
-                                    .set_level(rfd::MessageLevel::Warning)
-                                    .set_title("Memory Warning")
-                                    .set_description(format!("{}", error))
-                                    .set_buttons(rfd::MessageButtons::Ok)
-                                    .show();
-
-                                return Task::perform(dialog, Message::DialogResult)
-                                    .chain(Task::done(Message::Scheduler));
-                            }
-                        };
-                        // Create the PCB only if there is enough space in memory
-                        if instructions.len() + 5 <= self.memory.free_size() {
-                            // Create new PCB
-                            let next_id = self.memory.last_pcb_id() + 1;
-                            let mut new_pcb = PCB::new(next_id);
-                            // Store the instructions on memory
-                            let serialized = to_bytes(instructions);
-                            let size = &serialized.len();
-                            let (address, size) = match self.memory.store(serialized, *size) {
-                                Ok(address) => address,
-                                // No more memory to store the instructions
-                                Err(_) => {
-                                    todo!();
-                                }
-                            };
-                            new_pcb.code_segment(address, size);
-
-                            // Allocate the stack memory
-                            let (address, size) = match self.memory.store(vec![0; 5], 5) {
-                                Ok(address) => address,
-                                // No more memory to allocate the stack
-                                Err(_) => {
-                                    todo!();
-                                }
-                            };
-                            new_pcb.stack_segment(address, size);
-
-                            match self.memory.store_pcb(new_pcb) {
-                                Ok(_) => (),
-                                // No more memory to store PCBs
-                                Err(_) => todo!(),
-                            }
-
-                            self.loaded_files.push((file_name.to_string(), new_pcb.id));
-                        }
-                    }
+                if let Some(task) = create_pcbs(&mut self.storage, &mut self.memory, &mut self.loaded_files) {
+                    return task;
                 }
                 // Select the pcb from the table and send to distpacher
                 // Aqui irian los algorithmos del scheduler
@@ -228,6 +161,7 @@ impl Emulator {
                 }
             }
             Message::Distpacher((_pcb_id, address, size)) => {
+                // Context switch, load registers to the CPU
                 let mut pcb = PCB::from(&self.memory.data[address..address + size]);
                 self.cpu.ax = pcb.ax;
                 self.cpu.bx = pcb.bx;
@@ -243,12 +177,18 @@ impl Emulator {
                 }
 
                 pcb.process_state = ProcessState::Running;
+
+                // Save changes
                 let bytes: Vec<u8> = pcb.into();
                 self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
+
                 Task::none()
             }
+            // Runs when a running process is done
             Message::Terminated => {
+                // Select the running process
                 if let Some(((pcb_id, address, size), mut pcb)) = self.memory.running_process() {
+                    // Update PCB
                     pcb.process_state = ProcessState::Terminated;
                     pcb.ax = self.cpu.ax;
                     pcb.bx = self.cpu.bx;
@@ -259,12 +199,12 @@ impl Emulator {
                     pcb.sp = self.cpu.sp;
                     pcb.ir = self.cpu.ir;
                     pcb.z = self.cpu.z;
-
+                    // Save changes
                     let bytes: Vec<u8> = pcb.into();
                     self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
                     // Remove from pcb_table
                     self.memory.pcb_table.retain(|x| x.0 != pcb_id);
-                    // Free memory
+                    // Free memory TODO!()
                 };
                 Task::done(Message::Scheduler)
             }
@@ -287,15 +227,10 @@ impl Emulator {
                 };
                 Task::none()
             }
-            Message::Input(mut input) => {
-                input.retain(|c| c.is_numeric());
-                if input.len() <= 3 {
-                    self.display_content = input;
-                }
-                Task::none()
-            }
             Message::Unblock => {
+                // Take the first process from the waiting queue if it's not empty
                 if let Some((_, address, size)) = self.waiting_queue.first() {
+                    // Tak the value from the display and store it on dx
                     if let Ok(num) = self.display_content.parse::<u8>() {
                         let mut pcb = PCB::from(&self.memory.data[*address..*address + *size]);
 
@@ -314,12 +249,13 @@ impl Emulator {
                 Task::none()
             }
             Message::Tick => {
+                // Fetch instruction from memory
                 let bytes = &self.memory.data[self.cpu.pc + 1..self.cpu.pc + 1 + 5];
+                // Verify that it's a valid instruction
                 if bytes[0] == 0 {
                     self.mode = None;
                     return Task::done(Message::Terminated);
                 }
-                // Fetch
                 let instruction = Instruction::from(bytes);
 
                 // Decode and Execute
@@ -591,6 +527,13 @@ impl Emulator {
                 self.cpu.pc += 6;
                 Task::none()
             }
+            Message::Input(mut input) => {
+                input.retain(|c| c.is_numeric());
+                if input.len() <= 3 {
+                    self.display_content = input;
+                }
+                Task::none()
+            }
             Message::SchedulerSelected(scheduler) => {
                 if self.mode.is_none() {
                     self.config.scheduler = Some(scheduler);
@@ -603,13 +546,6 @@ impl Emulator {
     fn view(&self) -> iced::Element<'_, Message> {
         let mut play_button = button("Play/Pause");
         let mut next_button = button("Next");
-        /*let mut scheduler_pick_list = pick_list([
-            Scheduler::FCFS,
-            Scheduler::SRT,
-            Scheduler::SJF,
-            Scheduler::RR,
-            Scheduler::HRRN,
-            ], Scheduler::FCFS, Message::SchedulerSelected)*/
         if self.mode == Some(Mode::Manual) {
             next_button = next_button.on_press(Message::Tick);
         }
@@ -621,13 +557,17 @@ impl Emulator {
             button("File").on_press(Message::OpenFile),
             play_button,
             next_button,
-            pick_list([
-                Scheduler::FCFS,
-                Scheduler::SRT,
-                Scheduler::SJF,
-                Scheduler::RR,
-                Scheduler::HRRN,
-                ], self.config.scheduler, Message::SchedulerSelected),
+            pick_list(
+                [
+                    Scheduler::FCFS,
+                    Scheduler::SRT,
+                    Scheduler::SJF,
+                    Scheduler::RR,
+                    Scheduler::HRRN,
+                ],
+                self.config.scheduler,
+                Message::SchedulerSelected
+            ),
             widget::Space::new(iced::Length::Shrink, iced::Length::Fill)
         ]
         .height(40)
@@ -825,6 +765,83 @@ fn binary_display(bytes: &[u8]) -> Container<'static, Message> {
         .height(335)
         .width(320)
         .style(container::rounded_box)
+}
+
+fn create_pcbs(storage: &mut Storage, memory: &mut Memory, loaded_files: &mut Vec<(String, usize)>) -> Option<Task<Message>>{
+    // Before selecting the process to execute we have to make sure that PCBs have been created
+    // Check the list of stored files
+    for (file_name, address, data_size) in &storage.used {
+        // We only load 5 files at a time
+        if memory.pcb_table.len() == 5 {
+            break;
+        }
+        if loaded_files.iter().any(|x| x.0 == *file_name) {
+            // File already loaded , so we can ignore it
+        }
+        // Load only files that have not already being loaded
+        else {
+            // Parse the file into to list of instructions
+            let instructions = match read_file(
+                &storage.data[*address..(*address + *data_size)],
+            ) {
+                Ok(instructions) => instructions,
+                // Parsing Error
+                Err(error) => {
+                    // Remove file from memory
+                    storage.data[*address..*address + *data_size]
+                        .copy_from_slice(&vec![0; *data_size]);
+                    storage.freed.push(storage.used.remove(0));
+
+                    // Display the error to the user
+                    let dialog = rfd::AsyncMessageDialog::new()
+                        .set_level(rfd::MessageLevel::Warning)
+                        .set_title("Memory Warning")
+                        .set_description(format!("{}", error))
+                        .set_buttons(rfd::MessageButtons::Ok)
+                        .show();
+
+                    return Some(Task::perform(dialog, Message::DialogResult)
+                        .chain(Task::done(Message::Scheduler)));
+                }
+            };
+            // Create the PCB only if there is enough space in memory
+            if instructions.len() + 5 <= memory.free_size() {
+                // Create new PCB
+                let next_id = memory.last_pcb_id() + 1;
+                let mut new_pcb = PCB::new(next_id);
+                // Store the instructions on memory
+                let serialized = to_bytes(instructions);
+                let size = &serialized.len();
+                let (address, size) = match memory.store(serialized, *size) {
+                    Ok(address) => address,
+                    // No more memory to store the instructions
+                    Err(_) => {
+                        todo!();
+                    }
+                };
+                new_pcb.code_segment(address, size);
+
+                // Allocate the stack memory
+                let (address, size) = match memory.store(vec![0; 5], 5) {
+                    Ok(address) => address,
+                    // No more memory to allocate the stack
+                    Err(_) => {
+                        todo!();
+                    }
+                };
+                new_pcb.stack_segment(address, size);
+
+                match memory.store_pcb(new_pcb) {
+                    Ok(_) => (),
+                    // No more memory to store PCBs
+                    Err(_) => todo!(),
+                }
+
+                loaded_files.push((file_name.to_string(), new_pcb.id));
+            }
+        }
+    }
+    None
 }
 
 // Reads the content of the selected files and groups the file name with the file content
