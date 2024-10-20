@@ -152,12 +152,22 @@ impl Emulator {
                 if let Some(task) = create_pcbs(&mut self.storage, &mut self.memory, &mut self.loaded_files) {
                     return task;
                 }
-                // Select the pcb from the table and send to distpacher
-                // Aqui irian los algorithmos del scheduler
-                if let Some(pcb) = self.memory.pcb_table.first() {
-                    Task::done(Message::Distpacher(*pcb))
-                } else {
-                    Task::none()
+                // Uses the scheduler algo selected on config
+                match self.config.scheduler {
+                    Some(Scheduler::FCFS) => {
+                        // Select the pcb from the table and send to distpacher
+                        // Aqui irian los algorithmos del scheduler
+                        if let Some(pcb) = self.memory.pcb_table.first() {
+                            Task::done(Message::Distpacher(*pcb))
+                        } else {
+                            Task::none()
+                        }
+                    }
+                    Some(Scheduler::SRT) => Task::none(),
+                    Some(Scheduler::SJF) => Task::none(),
+                    Some(Scheduler::RR) => Task::none(),
+                    Some(Scheduler::HRRN) => Task::none(),
+                    None => Task::none(),
                 }
             }
             Message::Distpacher((_pcb_id, address, size)) => {
