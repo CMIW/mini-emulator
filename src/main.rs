@@ -200,7 +200,7 @@ impl Emulator {
             // Runs when a running process is done
             Message::Terminated(cpu_index) => {
                 // Select the running process
-                if let Some((mut cpu, pcb_id)) = self.cpus.get(cpu_index) {
+                if let Some((cpu, pcb_id)) = self.cpus.get(cpu_index) {
                     if let Some(p_id) = pcb_id {
                         if let Some((id, address, size)) = self.memory.pcb_table.iter().find(|x| x.0 == *p_id) {
                             let mut pcb = PCB::from(&self.memory.data[*address..*address + *size]);
@@ -228,7 +228,7 @@ impl Emulator {
             }
             Message::Blocked(cpu_index) => {
                 // Select the running process
-                if let Some((mut cpu, pcb_id)) = self.cpus.get(cpu_index) {
+                if let Some((cpu, pcb_id)) = self.cpus.get(cpu_index) {
                     if let Some(p_id) = pcb_id {
                         if let Some((id, address, size))  = self.memory.pcb_table.iter().find(|x| x.0 == *p_id) {
                             let mut pcb = PCB::from(&self.memory.data[*address..*address + *size]);
@@ -643,7 +643,7 @@ impl Emulator {
         let storage_display = binary_display(&self.storage.data[..]);
 
         // Display CPU content
-        let (cpu, _) = self.cpus.get(0).unwrap();
+        let (cpu, _) = self.cpus.first().unwrap();
         let cpu_display = cpu_display(cpu);
 
         let mut display = text_input(":$ ", &self.display_content).width(115);
