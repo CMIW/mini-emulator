@@ -19,4 +19,8 @@ impl CPU {
             ..Default::default()
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.ax == 0 && self.bx == 0 && self.cx == 0 && self.dx == 0 && self.ac == 0 && self.pc == 0 && self.sp == 0 && self.ir == None && self.z == false
+    }
 }

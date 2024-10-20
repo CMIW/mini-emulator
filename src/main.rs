@@ -22,7 +22,7 @@ fn main() -> iced::Result {
 
 #[derive(Default)]
 struct Emulator {
-    cpu: CPU,
+    cpus: Vec<(CPU,Option<usize>)>,
     mode: Option<Mode>,
     memory: Memory,
     storage: Storage,
@@ -44,16 +44,16 @@ enum Mode {
 enum Message {
     Tick,
     Input(String),
-    Blocked,
+    Blocked(usize),
     Unblock,
     OpenFile,
     Scheduler,
     DialogResult(rfd::MessageDialogResult),
     FilePicked(Result<Vec<PathBuf>, Error>),
     StoreFiles(Result<Vec<(String, Vec<u8>)>, Error>),
-    // (pcb_id, address, size)
-    Distpacher((usize, usize, usize)),
-    Terminated,
+    // (cpu, (pcb_id, address, size))
+    Distpacher((usise, (usize, usize, usize))),
+    Terminated(usize),
     ChangeMode,
     SchedulerSelected(Scheduler),
 }
@@ -83,7 +83,7 @@ impl Emulator {
             Self {
                 storage: Storage::new(config.storage),
                 memory: Memory::new(config.memory, config.os_segment),
-                cpu: CPU::new(),
+                cpus: Vec::with_capacity(config.cpu_quantity),
                 mode: None,
                 display_content: "".to_string(),
                 theme: iced::Theme::Dracula,
@@ -158,7 +158,7 @@ impl Emulator {
                         // Select the pcb from the table and send to distpacher
                         // Aqui irian los algorithmos del scheduler
                         if let Some(pcb) = self.memory.pcb_table.first() {
-                            Task::done(Message::Distpacher(*pcb))
+                            Task::done(Message::Distpacher((0, *pcb)))
                         } else {
                             Task::none()
                         }
@@ -170,18 +170,20 @@ impl Emulator {
                     None => Task::none(),
                 }
             }
-            Message::Distpacher((_pcb_id, address, size)) => {
+            Message::Distpacher((cpu_index, (pcb_id, address, size))) => {
+                let (mut cpu, mut _) = self.cpus.get(cpu_index);
+
                 // Context switch, load registers to the CPU
                 let mut pcb = PCB::from(&self.memory.data[address..address + size]);
-                self.cpu.ax = pcb.ax;
-                self.cpu.bx = pcb.bx;
-                self.cpu.cx = pcb.cx;
-                self.cpu.dx = pcb.dx;
-                self.cpu.ac = pcb.ac;
-                self.cpu.pc = pcb.pc;
-                self.cpu.sp = pcb.sp;
-                self.cpu.ir = pcb.ir;
-                self.cpu.z = pcb.z;
+                cpu.ax = pcb.ax;
+                cpu.bx = pcb.bx;
+                cpu.cx = pcb.cx;
+                cpu.dx = pcb.dx;
+                cpu.ac = pcb.ac;
+                cpu.pc = pcb.pc;
+                cpu.sp = pcb.sp;
+                cpu.ir = pcb.ir;
+                cpu.z = pcb.z;
                 if self.mode.is_none() {
                     self.mode = Some(Mode::Manual);
                 }
@@ -192,49 +194,57 @@ impl Emulator {
                 let bytes: Vec<u8> = pcb.into();
                 self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
 
+                self.cpus[cpu_index].1 = Some(pcb_id);
+
                 Task::none()
             }
             // Runs when a running process is done
-            Message::Terminated => {
+            Message::Terminated(cpu_index) => {
                 // Select the running process
-                if let Some(((pcb_id, address, size), mut pcb)) = self.memory.running_process() {
+                let mut (cpu, p_id) = self.cpus.get(cpu_index);
+                if let Some(id, address, size)  = self.memory.pcb_table.iter().find(|x| x.0 == p_id) {
+                    let mut pcb = PCB::from(&self.memory.data[address..address + size]);
                     // Update PCB
                     pcb.process_state = ProcessState::Terminated;
-                    pcb.ax = self.cpu.ax;
-                    pcb.bx = self.cpu.bx;
-                    pcb.cx = self.cpu.cx;
-                    pcb.dx = self.cpu.dx;
-                    pcb.ac = self.cpu.ac;
-                    pcb.pc = self.cpu.pc;
-                    pcb.sp = self.cpu.sp;
-                    pcb.ir = self.cpu.ir;
-                    pcb.z = self.cpu.z;
+                    pcb.ax = cpu.ax;
+                    pcb.bx = cpu.bx;
+                    pcb.cx = cpu.cx;
+                    pcb.dx = cpu.dx;
+                    pcb.ac = cpu.ac;
+                    pcb.pc = cpu.pc;
+                    pcb.sp = cpu.sp;
+                    pcb.ir = cpu.ir;
+                    pcb.z = cpu.z;
                     // Save changes
                     let bytes: Vec<u8> = pcb.into();
                     self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
                     // Remove from pcb_table
                     self.memory.pcb_table.retain(|x| x.0 != pcb_id);
                     // Free memory TODO!()
-                };
+                }
                 Task::done(Message::Scheduler)
             }
-            Message::Blocked => {
-                if let Some(((id, address, size), mut pcb)) = self.memory.running_process() {
+            Message::Blocked(cpu_index) => {
+                // Select the running process
+                let mut (cpu, p_id) = self.cpus.get(cpu_index);
+                if let Some(id, address, size)  = self.memory.pcb_table.iter().find(|x| x.0 == p_id) {
+                    let mut pcb = PCB::from(&self.memory.data[address..address + size]);
+                    // Update PCB
                     pcb.process_state = ProcessState::Blocked;
-                    pcb.ax = self.cpu.ax;
-                    pcb.bx = self.cpu.bx;
-                    pcb.cx = self.cpu.cx;
-                    pcb.dx = self.cpu.dx;
-                    pcb.ac = self.cpu.ac;
-                    pcb.pc = self.cpu.pc;
-                    pcb.sp = self.cpu.sp;
-                    pcb.ir = self.cpu.ir;
-                    pcb.z = self.cpu.z;
-
+                    pcb.ax = cpu.ax;
+                    pcb.bx = cpu.bx;
+                    pcb.cx = cpu.cx;
+                    pcb.dx = cpu.dx;
+                    pcb.ac = cpu.ac;
+                    pcb.pc = cpu.pc;
+                    pcb.sp = cpu.sp;
+                    pcb.ir = cpu.ir;
+                    pcb.z = cpu.z;
+                    // Save changes
                     let bytes: Vec<u8> = pcb.into();
                     self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
                     self.waiting_queue.push((id, address, size));
-                };
+                }
                 Task::none()
             }
             Message::Unblock => {
@@ -259,282 +269,286 @@ impl Emulator {
                 Task::none()
             }
             Message::Tick => {
-                // Fetch instruction from memory
-                let bytes = &self.memory.data[self.cpu.pc + 1..self.cpu.pc + 1 + 5];
-                // Verify that it's a valid instruction
-                if bytes[0] == 0 {
-                    self.mode = None;
-                    return Task::done(Message::Terminated);
-                }
-                let instruction = Instruction::from(bytes);
+                for (i, cpu) in self.cpus.iter().enumerate() {
+                    if !cpu.is_empty() {
+                        // Fetch instruction from memory
+                        let bytes = &self.memory.data[cpu.pc + 1..cpu.pc + 1 + 5];
+                        // Verify that it's a valid instruction
+                        if bytes[0] == 0 {
+                            self.mode = None;
+                            return Task::done(Message::Terminated(i));
+                        }
+                        let instruction = Instruction::from(bytes);
 
-                // Decode and Execute
-                self.cpu.ir = Some(instruction.operation);
-                match instruction.operation {
-                    Operation::LOAD => {
-                        if let Operands::V2(r) = instruction.operands {
-                            match r {
-                                Register::AX => self.cpu.ac = self.cpu.ax,
-                                Register::BX => self.cpu.ac = self.cpu.bx,
-                                Register::CX => self.cpu.ac = self.cpu.cx,
-                                Register::DX => self.cpu.ac = self.cpu.dx,
+                        // Decode and Execute
+                        cpu.ir = Some(instruction.operation);
+                        match instruction.operation {
+                            Operation::LOAD => {
+                                if let Operands::V2(r) = instruction.operands {
+                                    match r {
+                                        Register::AX => cpu.ac = cpu.ax,
+                                        Register::BX => cpu.ac = cpu.bx,
+                                        Register::CX => cpu.ac = cpu.cx,
+                                        Register::DX => cpu.ac = cpu.dx,
+                                    }
+                                }
                             }
-                        }
-                    }
-                    Operation::STORE => {
-                        if let Operands::V2(r) = instruction.operands {
-                            match r {
-                                Register::AX => self.cpu.ax = self.cpu.ac,
-                                Register::BX => self.cpu.bx = self.cpu.ac,
-                                Register::CX => self.cpu.cx = self.cpu.ac,
-                                Register::DX => self.cpu.dx = self.cpu.ac,
+                            Operation::STORE => {
+                                if let Operands::V2(r) = instruction.operands {
+                                    match r {
+                                        Register::AX => cpu.ax = cpu.ac,
+                                        Register::BX => cpu.bx = cpu.ac,
+                                        Register::CX => cpu.cx = cpu.ac,
+                                        Register::DX => cpu.dx = cpu.ac,
+                                    }
+                                }
                             }
-                        }
-                    }
-                    Operation::MOV => match instruction.operands {
-                        Operands::V5(r, num) => match r {
-                            Register::AX => self.cpu.ax = num,
-                            Register::BX => self.cpu.bx = num,
-                            Register::CX => self.cpu.cx = num,
-                            Register::DX => self.cpu.dx = num,
-                        },
-                        Operands::V6(r1, r2) => match r1 {
-                            Register::AX => match r2 {
-                                Register::BX => self.cpu.ax = self.cpu.bx,
-                                Register::CX => self.cpu.ax = self.cpu.cx,
-                                Register::DX => self.cpu.ax = self.cpu.dx,
+                            Operation::MOV => match instruction.operands {
+                                Operands::V5(r, num) => match r {
+                                    Register::AX => cpu.ax = num,
+                                    Register::BX => cpu.bx = num,
+                                    Register::CX => cpu.cx = num,
+                                    Register::DX => cpu.dx = num,
+                                },
+                                Operands::V6(r1, r2) => match r1 {
+                                    Register::AX => match r2 {
+                                        Register::BX => cpu.ax = cpu.bx,
+                                        Register::CX => cpu.ax = cpu.cx,
+                                        Register::DX => cpu.ax = cpu.dx,
+                                        _ => {}
+                                    },
+                                    Register::BX => match r2 {
+                                        Register::AX => cpu.bx = cpu.ax,
+                                        Register::CX => cpu.bx = cpu.cx,
+                                        Register::DX => cpu.bx = cpu.dx,
+                                        _ => {}
+                                    },
+                                    Register::CX => match r2 {
+                                        Register::AX => cpu.cx = cpu.ax,
+                                        Register::BX => cpu.cx = cpu.bx,
+                                        Register::DX => cpu.cx = cpu.dx,
+                                        _ => {}
+                                    },
+                                    Register::DX => match r2 {
+                                        Register::AX => cpu.dx = cpu.ax,
+                                        Register::BX => cpu.dx = cpu.bx,
+                                        Register::CX => cpu.dx = cpu.cx,
+                                        _ => {}
+                                    },
+                                },
                                 _ => {}
                             },
-                            Register::BX => match r2 {
-                                Register::AX => self.cpu.bx = self.cpu.ax,
-                                Register::CX => self.cpu.bx = self.cpu.cx,
-                                Register::DX => self.cpu.bx = self.cpu.dx,
+                            Operation::ADD => {
+                                if let Operands::V2(r) = instruction.operands {
+                                    match r {
+                                        Register::AX => cpu.ac += cpu.ax,
+                                        Register::BX => cpu.ac += cpu.bx,
+                                        Register::CX => cpu.ac += cpu.cx,
+                                        Register::DX => cpu.ac += cpu.dx,
+                                    }
+                                }
+                            }
+                            Operation::SUB => {
+                                if let Operands::V2(r) = instruction.operands {
+                                    match r {
+                                        Register::AX => cpu.ac -= cpu.ax,
+                                        Register::BX => cpu.ac -= cpu.bx,
+                                        Register::CX => cpu.ac -= cpu.cx,
+                                        Register::DX => cpu.ac -= cpu.dx,
+                                    }
+                                }
+                            }
+                            Operation::INC => match instruction.operands {
+                                Operands::V0 => cpu.ac += 1,
+                                Operands::V2(r) => match r {
+                                    Register::AX => cpu.ac += cpu.ax,
+                                    Register::BX => cpu.ac += cpu.bx,
+                                    Register::CX => cpu.ac += cpu.cx,
+                                    Register::DX => cpu.ac += cpu.dx,
+                                },
                                 _ => {}
                             },
-                            Register::CX => match r2 {
-                                Register::AX => self.cpu.cx = self.cpu.ax,
-                                Register::BX => self.cpu.cx = self.cpu.bx,
-                                Register::DX => self.cpu.cx = self.cpu.dx,
+                            Operation::DEC => match instruction.operands {
+                                Operands::V0 => cpu.ac -= 1,
+                                Operands::V2(r) => match r {
+                                    Register::AX => cpu.ac -= cpu.ax,
+                                    Register::BX => cpu.ac -= cpu.bx,
+                                    Register::CX => cpu.ac -= cpu.cx,
+                                    Register::DX => cpu.ac -= cpu.dx,
+                                },
                                 _ => {}
                             },
-                            Register::DX => match r2 {
-                                Register::AX => self.cpu.dx = self.cpu.ax,
-                                Register::BX => self.cpu.dx = self.cpu.bx,
-                                Register::CX => self.cpu.dx = self.cpu.cx,
-                                _ => {}
-                            },
-                        },
-                        _ => {}
-                    },
-                    Operation::ADD => {
-                        if let Operands::V2(r) = instruction.operands {
-                            match r {
-                                Register::AX => self.cpu.ac += self.cpu.ax,
-                                Register::BX => self.cpu.ac += self.cpu.bx,
-                                Register::CX => self.cpu.ac += self.cpu.cx,
-                                Register::DX => self.cpu.ac += self.cpu.dx,
+                            Operation::SWAP => {
+                                if let Operands::V6(r1, r2) = instruction.operands {
+                                    match r1 {
+                                        Register::AX => match r2 {
+                                            Register::BX => mem::swap(&mut cpu.ax, &mut cpu.bx),
+                                            Register::CX => mem::swap(&mut cpu.ax, &mut cpu.cx),
+                                            Register::DX => mem::swap(&mut cpu.ax, &mut cpu.dx),
+                                            _ => {}
+                                        },
+                                        Register::BX => match r2 {
+                                            Register::AX => mem::swap(&mut cpu.bx, &mut cpu.ax),
+                                            Register::CX => mem::swap(&mut cpu.bx, &mut cpu.cx),
+                                            Register::DX => mem::swap(&mut cpu.bx, &mut cpu.dx),
+                                            _ => {}
+                                        },
+                                        Register::CX => match r2 {
+                                            Register::AX => mem::swap(&mut cpu.cx, &mut cpu.ax),
+                                            Register::BX => mem::swap(&mut cpu.cx, &mut cpu.bx),
+                                            Register::DX => mem::swap(&mut cpu.cx, &mut cpu.dx),
+                                            _ => {}
+                                        },
+                                        Register::DX => match r2 {
+                                            Register::AX => mem::swap(&mut cpu.dx, &mut cpu.ax),
+                                            Register::BX => mem::swap(&mut cpu.dx, &mut cpu.bx),
+                                            Register::CX => mem::swap(&mut cpu.dx, &mut cpu.cx),
+                                            _ => {}
+                                        },
+                                    }
+                                }
+                            }
+                            Operation::INT => {
+                                if let Operands::V3(i) = instruction.operands {
+                                    match i {
+                                        Interupt::H20 => {
+                                            self.mode = None;
+                                            return Task::done(Message::Terminated(i));
+                                        }
+                                        Interupt::H10 => self.display_content = cpu.dx.to_string(),
+                                        Interupt::H09 => {
+                                            //self.mode = None;
+                                            return Task::done(Message::Blocked(i));
+                                        }
+                                    }
+                                }
+                            }
+                            Operation::JMP => {
+                                if let Operands::V1(s, num) = instruction.operands {
+                                    match s {
+                                        0 => cpu.pc += (7 * num) as usize,
+                                        1 => cpu.pc -= (7 * num) as usize,
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            Operation::JE => {
+                                if cpu.z {
+                                    if let Operands::V1(s, num) = instruction.operands {
+                                        match s {
+                                            0 => cpu.pc += (7 * num) as usize,
+                                            1 => cpu.pc -= (7 * num) as usize,
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                            Operation::JNE => {
+                                if !cpu.z {
+                                    if let Operands::V1(s, num) = instruction.operands {
+                                        match s {
+                                            0 => cpu.pc += (7 * num) as usize,
+                                            1 => cpu.pc -= (7 * num) as usize,
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                            Operation::PUSH => {
+                                if let Operands::V2(r) = instruction.operands {
+                                    match r {
+                                        Register::AX => {
+                                            self.memory.data[cpu.sp] = cpu.ax;
+                                            cpu.sp += 1;
+                                        }
+                                        Register::BX => {
+                                            self.memory.data[cpu.sp] = cpu.bx;
+                                            cpu.sp += 1;
+                                        }
+                                        Register::CX => {
+                                            self.memory.data[cpu.sp] = cpu.cx;
+                                            cpu.sp += 1;
+                                        }
+                                        Register::DX => {
+                                            self.memory.data[cpu.sp] = cpu.dx;
+                                            cpu.sp += 1;
+                                        }
+                                    }
+                                }
+                            }
+                            Operation::POP => {
+                                if let Operands::V2(r) = instruction.operands {
+                                    match r {
+                                        Register::AX => {
+                                            cpu.ax = self.memory.data[cpu.sp];
+                                            cpu.sp -= 1;
+                                        }
+                                        Register::BX => {
+                                            cpu.bx = self.memory.data[cpu.sp];
+                                            cpu.sp -= 1;
+                                        }
+                                        Register::CX => {
+                                            cpu.cx = self.memory.data[cpu.sp];
+                                            cpu.sp -= 1;
+                                        }
+                                        Register::DX => {
+                                            cpu.dx = self.memory.data[cpu.sp];
+                                            cpu.sp -= 1;
+                                        }
+                                    }
+                                }
+                            }
+                            Operation::PARAM => {
+                                if let Operands::V4(p1, p2, p3) = instruction.operands {
+                                    if p1 != 0 {
+                                        self.memory.data[cpu.sp] = p1;
+                                        cpu.sp += 1;
+                                    }
+                                    if p2 != 0 {
+                                        self.memory.data[cpu.sp] = p2;
+                                        cpu.sp += 1;
+                                    }
+                                    if p3 != 0 {
+                                        self.memory.data[cpu.sp] = p3;
+                                        cpu.sp += 1;
+                                    }
+                                }
+                            }
+                            Operation::CMP => {
+                                if let Operands::V6(r1, r2) = instruction.operands {
+                                    match r1 {
+                                        Register::AX => match r2 {
+                                            Register::BX => cpu.z = cpu.ax == cpu.bx,
+                                            Register::CX => cpu.z = cpu.ax == cpu.cx,
+                                            Register::DX => cpu.z = cpu.ax == cpu.dx,
+                                            _ => {}
+                                        },
+                                        Register::BX => match r2 {
+                                            Register::AX => cpu.z = cpu.bx == cpu.ax,
+                                            Register::CX => cpu.z = cpu.bx == cpu.cx,
+                                            Register::DX => cpu.z = cpu.bx == cpu.dx,
+                                            _ => {}
+                                        },
+                                        Register::CX => match r2 {
+                                            Register::AX => cpu.z = cpu.cx == cpu.ax,
+                                            Register::BX => cpu.z = cpu.cx == cpu.bx,
+                                            Register::DX => cpu.z = cpu.cx == cpu.dx,
+                                            _ => {}
+                                        },
+                                        Register::DX => match r2 {
+                                            Register::AX => cpu.z = cpu.dx == cpu.ax,
+                                            Register::BX => cpu.z = cpu.dx == cpu.bx,
+                                            Register::CX => cpu.z = cpu.dx == cpu.cx,
+                                            _ => {}
+                                        },
+                                    }
+                                }
                             }
                         }
-                    }
-                    Operation::SUB => {
-                        if let Operands::V2(r) = instruction.operands {
-                            match r {
-                                Register::AX => self.cpu.ac -= self.cpu.ax,
-                                Register::BX => self.cpu.ac -= self.cpu.bx,
-                                Register::CX => self.cpu.ac -= self.cpu.cx,
-                                Register::DX => self.cpu.ac -= self.cpu.dx,
-                            }
-                        }
-                    }
-                    Operation::INC => match instruction.operands {
-                        Operands::V0 => self.cpu.ac += 1,
-                        Operands::V2(r) => match r {
-                            Register::AX => self.cpu.ac += self.cpu.ax,
-                            Register::BX => self.cpu.ac += self.cpu.bx,
-                            Register::CX => self.cpu.ac += self.cpu.cx,
-                            Register::DX => self.cpu.ac += self.cpu.dx,
-                        },
-                        _ => {}
-                    },
-                    Operation::DEC => match instruction.operands {
-                        Operands::V0 => self.cpu.ac -= 1,
-                        Operands::V2(r) => match r {
-                            Register::AX => self.cpu.ac -= self.cpu.ax,
-                            Register::BX => self.cpu.ac -= self.cpu.bx,
-                            Register::CX => self.cpu.ac -= self.cpu.cx,
-                            Register::DX => self.cpu.ac -= self.cpu.dx,
-                        },
-                        _ => {}
-                    },
-                    Operation::SWAP => {
-                        if let Operands::V6(r1, r2) = instruction.operands {
-                            match r1 {
-                                Register::AX => match r2 {
-                                    Register::BX => mem::swap(&mut self.cpu.ax, &mut self.cpu.bx),
-                                    Register::CX => mem::swap(&mut self.cpu.ax, &mut self.cpu.cx),
-                                    Register::DX => mem::swap(&mut self.cpu.ax, &mut self.cpu.dx),
-                                    _ => {}
-                                },
-                                Register::BX => match r2 {
-                                    Register::AX => mem::swap(&mut self.cpu.bx, &mut self.cpu.ax),
-                                    Register::CX => mem::swap(&mut self.cpu.bx, &mut self.cpu.cx),
-                                    Register::DX => mem::swap(&mut self.cpu.bx, &mut self.cpu.dx),
-                                    _ => {}
-                                },
-                                Register::CX => match r2 {
-                                    Register::AX => mem::swap(&mut self.cpu.cx, &mut self.cpu.ax),
-                                    Register::BX => mem::swap(&mut self.cpu.cx, &mut self.cpu.bx),
-                                    Register::DX => mem::swap(&mut self.cpu.cx, &mut self.cpu.dx),
-                                    _ => {}
-                                },
-                                Register::DX => match r2 {
-                                    Register::AX => mem::swap(&mut self.cpu.dx, &mut self.cpu.ax),
-                                    Register::BX => mem::swap(&mut self.cpu.dx, &mut self.cpu.bx),
-                                    Register::CX => mem::swap(&mut self.cpu.dx, &mut self.cpu.cx),
-                                    _ => {}
-                                },
-                            }
-                        }
-                    }
-                    Operation::INT => {
-                        if let Operands::V3(i) = instruction.operands {
-                            match i {
-                                Interupt::H20 => {
-                                    self.mode = None;
-                                    return Task::done(Message::Terminated);
-                                }
-                                Interupt::H10 => self.display_content = self.cpu.dx.to_string(),
-                                Interupt::H09 => {
-                                    //self.mode = None;
-                                    return Task::done(Message::Blocked);
-                                }
-                            }
-                        }
-                    }
-                    Operation::JMP => {
-                        if let Operands::V1(s, num) = instruction.operands {
-                            match s {
-                                0 => self.cpu.pc += (7 * num) as usize,
-                                1 => self.cpu.pc -= (7 * num) as usize,
-                                _ => {}
-                            }
-                        }
-                    }
-                    Operation::JE => {
-                        if self.cpu.z {
-                            if let Operands::V1(s, num) = instruction.operands {
-                                match s {
-                                    0 => self.cpu.pc += (7 * num) as usize,
-                                    1 => self.cpu.pc -= (7 * num) as usize,
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                    Operation::JNE => {
-                        if !self.cpu.z {
-                            if let Operands::V1(s, num) = instruction.operands {
-                                match s {
-                                    0 => self.cpu.pc += (7 * num) as usize,
-                                    1 => self.cpu.pc -= (7 * num) as usize,
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                    Operation::PUSH => {
-                        if let Operands::V2(r) = instruction.operands {
-                            match r {
-                                Register::AX => {
-                                    self.memory.data[self.cpu.sp] = self.cpu.ax;
-                                    self.cpu.sp += 1;
-                                }
-                                Register::BX => {
-                                    self.memory.data[self.cpu.sp] = self.cpu.bx;
-                                    self.cpu.sp += 1;
-                                }
-                                Register::CX => {
-                                    self.memory.data[self.cpu.sp] = self.cpu.cx;
-                                    self.cpu.sp += 1;
-                                }
-                                Register::DX => {
-                                    self.memory.data[self.cpu.sp] = self.cpu.dx;
-                                    self.cpu.sp += 1;
-                                }
-                            }
-                        }
-                    }
-                    Operation::POP => {
-                        if let Operands::V2(r) = instruction.operands {
-                            match r {
-                                Register::AX => {
-                                    self.cpu.ax = self.memory.data[self.cpu.sp];
-                                    self.cpu.sp -= 1;
-                                }
-                                Register::BX => {
-                                    self.cpu.bx = self.memory.data[self.cpu.sp];
-                                    self.cpu.sp -= 1;
-                                }
-                                Register::CX => {
-                                    self.cpu.cx = self.memory.data[self.cpu.sp];
-                                    self.cpu.sp -= 1;
-                                }
-                                Register::DX => {
-                                    self.cpu.dx = self.memory.data[self.cpu.sp];
-                                    self.cpu.sp -= 1;
-                                }
-                            }
-                        }
-                    }
-                    Operation::PARAM => {
-                        if let Operands::V4(p1, p2, p3) = instruction.operands {
-                            if p1 != 0 {
-                                self.memory.data[self.cpu.sp] = p1;
-                                self.cpu.sp += 1;
-                            }
-                            if p2 != 0 {
-                                self.memory.data[self.cpu.sp] = p2;
-                                self.cpu.sp += 1;
-                            }
-                            if p3 != 0 {
-                                self.memory.data[self.cpu.sp] = p3;
-                                self.cpu.sp += 1;
-                            }
-                        }
-                    }
-                    Operation::CMP => {
-                        if let Operands::V6(r1, r2) = instruction.operands {
-                            match r1 {
-                                Register::AX => match r2 {
-                                    Register::BX => self.cpu.z = self.cpu.ax == self.cpu.bx,
-                                    Register::CX => self.cpu.z = self.cpu.ax == self.cpu.cx,
-                                    Register::DX => self.cpu.z = self.cpu.ax == self.cpu.dx,
-                                    _ => {}
-                                },
-                                Register::BX => match r2 {
-                                    Register::AX => self.cpu.z = self.cpu.bx == self.cpu.ax,
-                                    Register::CX => self.cpu.z = self.cpu.bx == self.cpu.cx,
-                                    Register::DX => self.cpu.z = self.cpu.bx == self.cpu.dx,
-                                    _ => {}
-                                },
-                                Register::CX => match r2 {
-                                    Register::AX => self.cpu.z = self.cpu.cx == self.cpu.ax,
-                                    Register::BX => self.cpu.z = self.cpu.cx == self.cpu.bx,
-                                    Register::DX => self.cpu.z = self.cpu.cx == self.cpu.dx,
-                                    _ => {}
-                                },
-                                Register::DX => match r2 {
-                                    Register::AX => self.cpu.z = self.cpu.dx == self.cpu.ax,
-                                    Register::BX => self.cpu.z = self.cpu.dx == self.cpu.bx,
-                                    Register::CX => self.cpu.z = self.cpu.dx == self.cpu.cx,
-                                    _ => {}
-                                },
-                            }
-                        }
+
+                        cpu.pc += 6;
                     }
                 }
-
-                self.cpu.pc += 6;
                 Task::none()
             }
             Message::Input(mut input) => {
@@ -624,7 +638,7 @@ impl Emulator {
         let storage_display = binary_display(&self.storage.data[..]);
 
         // Display CPU content
-        let cpu_display = cpu_display(&self.cpu);
+        let cpu_display = cpu_display(self.cpus.get(0));
 
         let mut display = text_input(":$ ", &self.display_content).width(115);
         if !self.waiting_queue.is_empty() {
