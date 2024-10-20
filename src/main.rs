@@ -52,7 +52,7 @@ enum Message {
     FilePicked(Result<Vec<PathBuf>, Error>),
     StoreFiles(Result<Vec<(String, Vec<u8>)>, Error>),
     // (cpu, (pcb_id, address, size))
-    Distpacher((usise, (usize, usize, usize))),
+    Distpacher((usize, (usize, usize, usize))),
     Terminated(usize),
     ChangeMode,
     SchedulerSelected(Scheduler),
@@ -171,79 +171,84 @@ impl Emulator {
                 }
             }
             Message::Distpacher((cpu_index, (pcb_id, address, size))) => {
-                let (mut cpu, mut _) = self.cpus.get(cpu_index);
+                if let Some((mut cpu, _)) = self.cpus.get(cpu_index) {
+                    // Context switch, load registers to the CPU
+                    let mut pcb = PCB::from(&self.memory.data[address..address + size]);
+                    cpu.ax = pcb.ax;
+                    cpu.bx = pcb.bx;
+                    cpu.cx = pcb.cx;
+                    cpu.dx = pcb.dx;
+                    cpu.ac = pcb.ac;
+                    cpu.pc = pcb.pc;
+                    cpu.sp = pcb.sp;
+                    cpu.ir = pcb.ir;
+                    cpu.z = pcb.z;
+                    if self.mode.is_none() {
+                        self.mode = Some(Mode::Manual);
+                    }
 
-                // Context switch, load registers to the CPU
-                let mut pcb = PCB::from(&self.memory.data[address..address + size]);
-                cpu.ax = pcb.ax;
-                cpu.bx = pcb.bx;
-                cpu.cx = pcb.cx;
-                cpu.dx = pcb.dx;
-                cpu.ac = pcb.ac;
-                cpu.pc = pcb.pc;
-                cpu.sp = pcb.sp;
-                cpu.ir = pcb.ir;
-                cpu.z = pcb.z;
-                if self.mode.is_none() {
-                    self.mode = Some(Mode::Manual);
+                    pcb.process_state = ProcessState::Running;
+
+                    // Save changes
+                    let bytes: Vec<u8> = pcb.into();
+                    self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
+
+                    self.cpus[cpu_index].1 = Some(pcb_id);
                 }
-
-                pcb.process_state = ProcessState::Running;
-
-                // Save changes
-                let bytes: Vec<u8> = pcb.into();
-                self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
-
-                self.cpus[cpu_index].1 = Some(pcb_id);
-
                 Task::none()
             }
             // Runs when a running process is done
             Message::Terminated(cpu_index) => {
                 // Select the running process
-                let mut (cpu, p_id) = self.cpus.get(cpu_index);
-                if let Some(id, address, size)  = self.memory.pcb_table.iter().find(|x| x.0 == p_id) {
-                    let mut pcb = PCB::from(&self.memory.data[address..address + size]);
-                    // Update PCB
-                    pcb.process_state = ProcessState::Terminated;
-                    pcb.ax = cpu.ax;
-                    pcb.bx = cpu.bx;
-                    pcb.cx = cpu.cx;
-                    pcb.dx = cpu.dx;
-                    pcb.ac = cpu.ac;
-                    pcb.pc = cpu.pc;
-                    pcb.sp = cpu.sp;
-                    pcb.ir = cpu.ir;
-                    pcb.z = cpu.z;
-                    // Save changes
-                    let bytes: Vec<u8> = pcb.into();
-                    self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
-                    // Remove from pcb_table
-                    self.memory.pcb_table.retain(|x| x.0 != pcb_id);
-                    // Free memory TODO!()
+                if let Some((mut cpu, pcb_id)) = self.cpus.get(cpu_index) {
+                    if let Some(p_id) = pcb_id {
+                        if let Some((id, address, size)) = self.memory.pcb_table.iter().find(|x| x.0 == *p_id) {
+                            let mut pcb = PCB::from(&self.memory.data[*address..*address + *size]);
+                            // Update PCB
+                            pcb.process_state = ProcessState::Terminated;
+                            pcb.ax = cpu.ax;
+                            pcb.bx = cpu.bx;
+                            pcb.cx = cpu.cx;
+                            pcb.dx = cpu.dx;
+                            pcb.ac = cpu.ac;
+                            pcb.pc = cpu.pc;
+                            pcb.sp = cpu.sp;
+                            pcb.ir = cpu.ir;
+                            pcb.z = cpu.z;
+                            // Save changes
+                            let bytes: Vec<u8> = pcb.into();
+                            self.memory.data[*address..*address + *size].copy_from_slice(&bytes[..]);
+                            // Remove from pcb_table
+                            self.memory.pcb_table.retain(|x| x.0 != *p_id);
+                            // Free memory TODO!()
+                        }
+                    }
                 }
                 Task::done(Message::Scheduler)
             }
             Message::Blocked(cpu_index) => {
                 // Select the running process
-                let mut (cpu, p_id) = self.cpus.get(cpu_index);
-                if let Some(id, address, size)  = self.memory.pcb_table.iter().find(|x| x.0 == p_id) {
-                    let mut pcb = PCB::from(&self.memory.data[address..address + size]);
-                    // Update PCB
-                    pcb.process_state = ProcessState::Blocked;
-                    pcb.ax = cpu.ax;
-                    pcb.bx = cpu.bx;
-                    pcb.cx = cpu.cx;
-                    pcb.dx = cpu.dx;
-                    pcb.ac = cpu.ac;
-                    pcb.pc = cpu.pc;
-                    pcb.sp = cpu.sp;
-                    pcb.ir = cpu.ir;
-                    pcb.z = cpu.z;
-                    // Save changes
-                    let bytes: Vec<u8> = pcb.into();
-                    self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
-                    self.waiting_queue.push((id, address, size));
+                if let Some((mut cpu, pcb_id)) = self.cpus.get(cpu_index) {
+                    if let Some(p_id) = pcb_id {
+                        if let Some((id, address, size))  = self.memory.pcb_table.iter().find(|x| x.0 == *p_id) {
+                            let mut pcb = PCB::from(&self.memory.data[*address..*address + *size]);
+                            // Update PCB
+                            pcb.process_state = ProcessState::Blocked;
+                            pcb.ax = cpu.ax;
+                            pcb.bx = cpu.bx;
+                            pcb.cx = cpu.cx;
+                            pcb.dx = cpu.dx;
+                            pcb.ac = cpu.ac;
+                            pcb.pc = cpu.pc;
+                            pcb.sp = cpu.sp;
+                            pcb.ir = cpu.ir;
+                            pcb.z = cpu.z;
+                            // Save changes
+                            let bytes: Vec<u8> = pcb.into();
+                            self.memory.data[*address..*address + *size].copy_from_slice(&bytes[..]);
+                            self.waiting_queue.push((*id, *address, *size));
+                        }
+                    }
                 }
                 Task::none()
             }
@@ -269,14 +274,14 @@ impl Emulator {
                 Task::none()
             }
             Message::Tick => {
-                for (i, cpu) in self.cpus.iter().enumerate() {
+                for (cpu_i, (mut cpu,_)) in self.cpus.iter().enumerate() {
                     if !cpu.is_empty() {
                         // Fetch instruction from memory
                         let bytes = &self.memory.data[cpu.pc + 1..cpu.pc + 1 + 5];
                         // Verify that it's a valid instruction
                         if bytes[0] == 0 {
                             self.mode = None;
-                            return Task::done(Message::Terminated(i));
+                            return Task::done(Message::Terminated(cpu_i));
                         }
                         let instruction = Instruction::from(bytes);
 
@@ -413,12 +418,12 @@ impl Emulator {
                                     match i {
                                         Interupt::H20 => {
                                             self.mode = None;
-                                            return Task::done(Message::Terminated(i));
+                                            return Task::done(Message::Terminated(cpu_i));
                                         }
                                         Interupt::H10 => self.display_content = cpu.dx.to_string(),
                                         Interupt::H09 => {
                                             //self.mode = None;
-                                            return Task::done(Message::Blocked(i));
+                                            return Task::done(Message::Blocked(cpu_i));
                                         }
                                     }
                                 }
@@ -638,7 +643,8 @@ impl Emulator {
         let storage_display = binary_display(&self.storage.data[..]);
 
         // Display CPU content
-        let cpu_display = cpu_display(self.cpus.get(0));
+        let (cpu, _) = self.cpus.get(0).unwrap();
+        let cpu_display = cpu_display(cpu);
 
         let mut display = text_input(":$ ", &self.display_content).width(115);
         if !self.waiting_queue.is_empty() {
