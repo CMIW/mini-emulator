@@ -2514,6 +2514,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "iced",
+ "rand",
  "rfd",
  "serde",
  "serde_json",
