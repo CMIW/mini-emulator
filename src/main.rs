@@ -1,10 +1,10 @@
-use iced::widget::vertical_rule;
-use iced::widget::Container;
 use iced::widget::{
     button, column, container, pick_list, rich_text, row, scrollable, span, text, text_input,
+    tooltip, vertical_rule,
 };
+use iced::widget::{Container, Tooltip};
 use iced::{color, font, time, widget};
-use iced::{Element, Font, Subscription, Task, Theme};
+use iced::{Background, Element, Font, Subscription, Task, Theme};
 use rand::Rng;
 use std::fs::File;
 use std::io::BufReader;
@@ -749,56 +749,77 @@ impl Emulator {
     }
 }
 
-fn pcb_display(pcb: &PCB) -> Container<'static, Message> {
-    container(
-        row![
-            rich_text([span(pcb.id)
-                .font(Font {
+fn pcb_display(pcb: &PCB) -> Tooltip<'static, Message> {
+    tooltip(
+        container(
+            row![
+                rich_text([span(pcb.id)
+                    .font(Font {
+                        weight: font::Weight::Bold,
+                        ..Font::default()
+                    })
+                    .color(color!(0x1ef956))]),
+                vertical_rule(3),
+                rich_text([span(format!("{:?}", pcb.process_state))
+                    .font(Font {
+                        weight: font::Weight::Bold,
+                        ..Font::default()
+                    })
+                    .color(color!(0xbd93f9))]),
+                vertical_rule(3),
+                rich_text([span(pcb.priority).font(Font {
                     weight: font::Weight::Bold,
                     ..Font::default()
-                })
-                .color(color!(0x1ef956))]),
-            vertical_rule(3),
-            rich_text([span(format!("{:?}", pcb.process_state))
-                .font(Font {
-                    weight: font::Weight::Bold,
-                    ..Font::default()
-                })
-                .color(color!(0xbd93f9))]),
-            vertical_rule(3),
-            rich_text([span(pcb.priority).font(Font {
-                weight: font::Weight::Bold,
-                ..Font::default()
-            })]),
-            /*text("Code Segment"),
-            row![
-                text(format!("Address: {}", &pcb.code_segment)),
-                text(format!("Size: {}", &pcb.code_segment_size)),
+                })]),
             ]
             .spacing(5),
+        )
+        .height(40)
+        .padding([10, 10])
+        .style(container::rounded_box),
+        container(column![
             row![
-                text(format!("Stack Segment: {}", &pcb.stack_segment)),
-                text(format!("Size: {}", &pcb.stack_segment_size)),
-            ]
-            .spacing(5),
-            row![
-                text(format!("AX: {}", &pcb.ax)),
-                text(format!("BX: {}", &pcb.bx)),
-                text(format!("CX: {}", &pcb.cx)),
-                text(format!("DX: {}", &pcb.dx)),
-                text(format!("AC: {}", &pcb.ac)),
-            ]
-            .spacing(5),
-            text(format!("PC: {}", &pcb.pc)),
-            text(format!("SP: {}", &pcb.sp)),
-            text(format!("IR: {:?}", &pcb.ir)),
-            text(format!("Z: {}", &pcb.z))*/
-        ]
-        .spacing(5),
+                rich_text([
+                    span("ID: "),
+                    span(pcb.id)
+                        .font(Font {
+                            weight: font::Weight::Bold,
+                            ..Font::default()
+                        })
+                        .color(color!(0x1ef956))
+                ]),
+                widget::Space::new(80, iced::Length::Shrink),
+                rich_text([
+                    span("Priority: "),
+                    span(pcb.priority).font(Font {
+                        weight: font::Weight::Bold,
+                        ..Font::default()
+                    })
+                ])
+            ],
+            rich_text([
+                span("State: "),
+                span(format!("{:?}", pcb.process_state))
+                    .font(Font {
+                        weight: font::Weight::Bold,
+                        ..Font::default()
+                    })
+                    .color(color!(0xbd93f9))
+            ]),
+            text(format!(
+                "Code Segment: [{}; {}]",
+                &pcb.code_segment, &pcb.code_segment_size
+            )),
+            text(format!(
+                "Stack Segment: [{}; {}]",
+                &pcb.stack_segment, &pcb.stack_segment_size
+            )),
+        ])
+        .padding([10, 10])
+        .style(container::bordered_box),
+        tooltip::Position::Top,
     )
-    .height(40)
-    .padding([10, 10])
-    .style(container::rounded_box)
+    .into()
 }
 
 fn cpu_display(cpu: &CPU) -> Container<'static, Message> {
