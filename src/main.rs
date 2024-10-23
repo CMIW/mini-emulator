@@ -4,7 +4,7 @@ use iced::widget::{
 };
 use iced::widget::{Container, Tooltip};
 use iced::{color, font, time, widget};
-use iced::{Background, Element, Font, Subscription, Task, Theme};
+use iced::{Element, Font, Subscription, Task, Theme};
 use rand::Rng;
 use std::fs::File;
 use std::io::BufReader;
@@ -646,7 +646,7 @@ impl Emulator {
         let mut files = column![].padding([5, 10]);
         for (index, (file_name, _, _)) in self.storage.used.iter().enumerate() {
             if let Some((file, p_id)) = self.loaded_files.iter().find(|x| x.0 == *file_name) {
-                if let Some(_) = self.cpus.iter().find(|x| x.1 == Some(*p_id)) {
+                if self.cpus.iter().any(|x| x.1 == Some(*p_id)) {
                     if file_name == file {
                         files = files.push(rich_text([
                             span(index).font(Font {
@@ -819,7 +819,6 @@ fn pcb_display(pcb: &PCB) -> Tooltip<'static, Message> {
         .style(container::bordered_box),
         tooltip::Position::Top,
     )
-    .into()
 }
 
 fn cpu_display(cpu: &CPU) -> Container<'static, Message> {
