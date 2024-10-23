@@ -1,3 +1,4 @@
+use iced::widget::vertical_rule;
 use iced::widget::Container;
 use iced::widget::{
     button, column, container, pick_list, rich_text, row, scrollable, span, text, text_input,
@@ -162,19 +163,13 @@ impl Emulator {
                     Some(Scheduler::FCFS) => {
                         // Select the pcb from the table and send to distpacher
                         // Aqui irian los algorithmos del scheduler
-                        /*if let Some(pcb) = self.memory.pcb_table.first() {
-                            Task::done(Message::Distpacher((0, *pcb)))
-                        } else {
-                            Task::none()
-                        }*/
-                        for (_i, (pcb_id, address, size)) in self.memory.pcb_table.iter().enumerate()
+                        for (_i, (pcb_id, address, size)) in
+                            self.memory.pcb_table.iter().enumerate()
                         {
                             let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
                             if pcb.process_state == ProcessState::New {
                                 let mut list = vec![0; self.config.cpu_quantity];
-                                while list.iter().sum::<usize>()
-                                    < self.config.cpu_quantity
-                                {
+                                while list.iter().sum::<usize>() < self.config.cpu_quantity {
                                     let r_i = rng.gen_range(0..self.config.cpu_quantity);
                                     if let Some((_, p)) = self.cpus.get(r_i) {
                                         if p.is_none() {
@@ -602,8 +597,7 @@ impl Emulator {
             Message::SchedulerSelected(scheduler) => {
                 if self.mode.is_none() {
                     self.config.scheduler = Some(scheduler);
-                }
-                else {
+                } else {
                     println!("No se puede cambiar el planificador mientras el emulador está en ejecución.");
                     rfd::MessageDialog::new()
                         .set_level(rfd::MessageLevel::Warning)
@@ -647,8 +641,9 @@ impl Emulator {
         .height(40)
         .spacing(5)
         .padding([5, 10]);
-        let mut files = column![].padding([5, 10]);
 
+        // Show the list of files
+        let mut files = column![].padding([5, 10]);
         for (index, (file_name, _, _)) in self.storage.used.iter().enumerate() {
             if let Some((file, p_id)) = self.loaded_files.iter().find(|x| x.0 == *file_name) {
                 if let Some(_) = self.cpus.iter().find(|x| x.1 == Some(*p_id)) {
@@ -662,8 +657,7 @@ impl Emulator {
                             span(file).color(color!(0xff79c6)),
                         ]));
                     }
-                }
-                else {
+                } else {
                     files = files.push(rich_text([
                         span(index).font(Font {
                             weight: font::Weight::Bold,
@@ -684,8 +678,6 @@ impl Emulator {
                 ]));
             }
         }
-
-        // Show the list of files
         let files_display = container(scrollable(files))
             .height(iced::Length::Fill)
             .width(220)
@@ -709,41 +701,11 @@ impl Emulator {
             display = display.on_input(Message::Input).on_submit(Message::Unblock);
         }
 
-        let pcb_display = if let Some((_, pcb)) = self.memory.running_process() {
-            container(
-                column![
-                    text(format!("ID: {}", &pcb.id)),
-                    text("Code Segment"),
-                    row![
-                        text(format!("Address: {}", &pcb.code_segment)),
-                        text(format!("Size: {}", &pcb.code_segment_size)),
-                    ]
-                    .spacing(5),
-                    row![
-                        text(format!("Stack Segment: {}", &pcb.stack_segment)),
-                        text(format!("Size: {}", &pcb.stack_segment_size)),
-                    ]
-                    .spacing(5),
-                    text(format!("Process State: {:?}", &pcb.process_state)),
-                    text(format!("Priority: {}", &pcb.priority)),
-                    row![
-                        text(format!("AX: {}", &pcb.ax)),
-                        text(format!("BX: {}", &pcb.bx)),
-                        text(format!("CX: {}", &pcb.cx)),
-                        text(format!("DX: {}", &pcb.dx)),
-                        text(format!("AC: {}", &pcb.ac)),
-                    ]
-                    .spacing(5),
-                    text(format!("PC: {}", &pcb.pc)),
-                    text(format!("SP: {}", &pcb.sp)),
-                    text(format!("IR: {:?}", &pcb.ir)),
-                    text(format!("Z: {}", &pcb.z))
-                ]
-                .spacing(5),
-            )
-        } else {
-            container("")
-        };
+        let mut pcbs_display = row![].spacing(5);
+        for (_, address, size) in &self.memory.pcb_table {
+            let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
+            pcbs_display = pcbs_display.push(pcb_display(&pcb));
+        }
 
         widget::container(column![
             menu_bar,
@@ -760,8 +722,8 @@ impl Emulator {
                     cpus_display,
                     text("Display"),
                     display,
-                    text("Current PCB"),
-                    pcb_display,
+                    text("PCB List"),
+                    pcbs_display,
                 ],
                 widget::Space::new(iced::Length::Fill, iced::Length::Fill)
             ]
@@ -785,6 +747,58 @@ impl Emulator {
     fn theme(&self) -> Theme {
         self.theme.clone()
     }
+}
+
+fn pcb_display(pcb: &PCB) -> Container<'static, Message> {
+    container(
+        row![
+            rich_text([span(pcb.id)
+                .font(Font {
+                    weight: font::Weight::Bold,
+                    ..Font::default()
+                })
+                .color(color!(0x1ef956))]),
+            vertical_rule(3),
+            rich_text([span(format!("{:?}", pcb.process_state))
+                .font(Font {
+                    weight: font::Weight::Bold,
+                    ..Font::default()
+                })
+                .color(color!(0xbd93f9))]),
+            vertical_rule(3),
+            rich_text([span(pcb.priority).font(Font {
+                weight: font::Weight::Bold,
+                ..Font::default()
+            })]),
+            /*text("Code Segment"),
+            row![
+                text(format!("Address: {}", &pcb.code_segment)),
+                text(format!("Size: {}", &pcb.code_segment_size)),
+            ]
+            .spacing(5),
+            row![
+                text(format!("Stack Segment: {}", &pcb.stack_segment)),
+                text(format!("Size: {}", &pcb.stack_segment_size)),
+            ]
+            .spacing(5),
+            row![
+                text(format!("AX: {}", &pcb.ax)),
+                text(format!("BX: {}", &pcb.bx)),
+                text(format!("CX: {}", &pcb.cx)),
+                text(format!("DX: {}", &pcb.dx)),
+                text(format!("AC: {}", &pcb.ac)),
+            ]
+            .spacing(5),
+            text(format!("PC: {}", &pcb.pc)),
+            text(format!("SP: {}", &pcb.sp)),
+            text(format!("IR: {:?}", &pcb.ir)),
+            text(format!("Z: {}", &pcb.z))*/
+        ]
+        .spacing(5),
+    )
+    .height(40)
+    .padding([10, 10])
+    .style(container::rounded_box)
 }
 
 fn cpu_display(cpu: &CPU) -> Container<'static, Message> {
