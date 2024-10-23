@@ -564,6 +564,15 @@ impl Emulator {
                 if self.mode.is_none() {
                     self.config.scheduler = Some(scheduler);
                 }
+                else {
+                    println!("No se puede cambiar el planificador mientras el emulador está en ejecución.");
+                    rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Warning)
+                        .set_title("Cambio de Planificador")
+                        .set_description("No se puede cambiar el planificador mientras el emulador está en ejecución.")
+                        .set_buttons(rfd::MessageButtons::Ok)
+                        .show();
+                }
                 Task::none()
             }
         }
