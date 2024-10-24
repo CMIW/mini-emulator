@@ -10,6 +10,8 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::time::Instant;
+
 use std::{env, mem};
 
 use proyecto_1::{config::Config, error::Error};
@@ -34,6 +36,10 @@ struct Emulator {
     waiting_queue: Vec<(usize, usize, usize)>,
     loaded_files: Vec<(String, usize)>,
     theme: Theme,
+    show_stats: bool,
+    start_time: Option<Instant>,
+    total_start_time: Option<Instant>,
+    
 }
 
 #[derive(PartialEq)]
@@ -58,6 +64,7 @@ enum Message {
     Terminated(usize),
     ChangeMode,
     SchedulerSelected(Scheduler),
+    StatsPressed,
 }
 
 impl Emulator {
@@ -84,6 +91,7 @@ impl Emulator {
 
         (
             Self {
+                show_stats: false,
                 storage: Storage::new(config.storage),
                 memory: Memory::new(config.memory, config.os_segment),
                 cpus: vec![(CPU::new(), None); config.cpu_quantity],
@@ -93,6 +101,8 @@ impl Emulator {
                 waiting_queue: vec![],
                 loaded_files: vec![],
                 config,
+                start_time: None,
+                total_start_time: None,
             },
             Task::none(),
         )
@@ -114,6 +124,10 @@ impl Emulator {
 
                 Task::perform(dialog, Message::DialogResult)
             }
+            Message::StatsPressed => {
+                self.show_stats = !self.show_stats;
+                Task::none()
+            },
             // Saves the files content to storage
             Message::StoreFiles(Ok(files)) => {
                 for (file_name, data) in files {
@@ -147,6 +161,11 @@ impl Emulator {
                     self.mode = Some(Mode::Automatic);
                 } else {
                     self.mode = Some(Mode::Manual);
+                }
+                // Registrar el tiempo cuando 
+                if self.start_time.is_none() {
+                    self.total_start_time = Some(Instant::now());
+                    println!("Procesamiento iniciado.");
                 }
                 Task::none()
             }
@@ -196,6 +215,7 @@ impl Emulator {
             }
             Message::Distpacher((cpu_index, (pcb_id, address, size))) => {
                 if let Some((cpu, p)) = self.cpus.get_mut(cpu_index) {
+
                     // Context switch, load registers to the CPU
                     let mut pcb = PCB::from(&self.memory.data[address..address + size]);
                     cpu.ax = pcb.ax;
@@ -207,6 +227,16 @@ impl Emulator {
                     cpu.sp = pcb.sp;
                     cpu.ir = pcb.ir;
                     cpu.z = pcb.z;
+                    
+                    // Inicia el conteo de tiempo para este proceso
+                    cpu.start_time = Some(Instant::now());
+
+                    // Mostrar mensaje en consola al iniciar el procesamiento de un proceso
+                    println!(
+                        "Asignando proceso con ID: {} en CPU {}",
+                        pcb_id, cpu_index
+                    );
+
                     if self.mode.is_none() {
                         self.mode = Some(Mode::Manual);
                     }
@@ -230,8 +260,23 @@ impl Emulator {
                             self.memory.pcb_table.iter().find(|x| x.0 == *p_id)
                         {
                             let mut pcb = PCB::from(&self.memory.data[*address..*address + *size]);
+                            // Mostrar mensaje en consola cuando el proceso finaliza
+                            println!("Proceso con ID: {} ha finalizado en CPU {}", p_id, cpu_index);
+
+                            // Calcular el tiempo transcurrido desde que se inició el proceso
+                            if let Some(start_time) = cpu.start_time {
+                                let duration = start_time.elapsed();
+                                println!(
+                                    "Tiempo transcurrido para el proceso con ID: {}: {:.2?} segundos",
+                                    p_id, duration
+                                );
+                                cpu.start_time = None; // Limpiar el tiempo de inicio del proceso
+                            }
+
+                       
+
                             // Update PCB
-                            pcb.process_state = ProcessState::Terminated;
+                            pcb.process_state = ProcessState::Terminated;                          
                             pcb.ax = cpu.ax;
                             pcb.bx = cpu.bx;
                             pcb.cx = cpu.cx;
@@ -251,6 +296,15 @@ impl Emulator {
                             *id = None;
                             *cpu = CPU::new();
                             // Free memory TODO!()
+
+                            // Verificar si todos los procesos han terminado
+                            if self.memory.pcb_table.is_empty() {
+                                if let Some(total_start_time) = self.total_start_time {
+                                    let total_duration = total_start_time.elapsed();
+                                    println!("\n Análisis completo. Tiempo total del análisis: {:.2?} segundos", total_duration);
+                                    self.total_start_time = None; 
+                                }
+                            } 
                         }
                     }
                 }
@@ -614,17 +668,53 @@ impl Emulator {
     fn view(&self) -> iced::Element<'_, Message> {
         let mut play_button = button("Play/Pause");
         let mut next_button = button("Next");
+        let stats_button = button("Stats").on_press(Message::StatsPressed);
         if self.mode == Some(Mode::Manual) {
             next_button = next_button.on_press(Message::Tick);
         }
         if self.mode.is_some() {
             play_button = play_button.on_press(Message::ChangeMode);
         }
+        //Stats display
+        if self.show_stats {
+            let scheduler_text = match self.config.scheduler {
+                Some(scheduler) => rich_text([
+                    span("Método seleccionado es: "),
+                    span(scheduler.to_string()).size(22).color(color!(0x9E69E3)),  
+                ]),
+                None => rich_text([span("No hay método seleccionado.")]), 
+            };
+            let stats_view = column![
+                container (
+                    text("Sección de Estadísticas del Sistema").size(30),
+                )
+                .padding(10).style(container::rounded_box).width(iced::Length::Fill).center_x(iced::Length::Fill),
+                widget::Space::with_height(iced::Length::Fixed(20.0)),                
+                scheduler_text, 
+                widget::Space::with_height(iced::Length::Fill),
+                row![
+                    widget::Space::with_width(iced::Length::Fill), 
+                    button("Volver")
+                    .on_press(Message::StatsPressed)
+                    .width(iced::Length::Shrink),
+                ]
+                       
+            ]
+
+            .padding(20);
+
+            return container(stats_view)
+                .width(iced::Length::Fill)
+                .height(iced::Length::Fill)
+
+                .into();
+        }
         // Menu bar
         let menu_bar = row![
             button("File").on_press(Message::OpenFile),
             play_button,
             next_button,
+            stats_button,
             pick_list(
                 [
                     Scheduler::FCFS,

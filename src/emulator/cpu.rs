@@ -11,6 +11,7 @@ pub struct CPU {
     pub sp: usize,
     pub ir: Option<Operation>,
     pub z: bool,
+    pub start_time: Option<std::time::Instant>,
 }
 
 impl CPU {
