@@ -25,12 +25,18 @@ impl Memory {
     }
 
     pub fn store(&mut self, data: Vec<u8>, size: usize) -> Result<(usize, usize), Error> {
-        // No memory space has been freed
+        // Some memory space has been freed
         if !self.freed.is_empty() && !self.used.is_empty() {
-            todo!();
+            for (i, (address, m_size)) in self.freed.clone().iter_mut().enumerate() {
+                if size == *m_size {
+                    self.data[*address..*address + size].copy_from_slice(&data[..]);
+                    self.used.push(self.freed.remove(i));
+                    return Ok((*address, *m_size));
+                }
+            }
         }
         // No memory has been used
-        else if self.used.is_empty() {
+        if self.used.is_empty() {
             if (self.data.len() - self.os_segment_size) > size {
                 // Copy data to "memory"
                 self.data[self.os_segment_size..self.os_segment_size + size]
@@ -58,6 +64,15 @@ impl Memory {
         }
     }
 
+    // Move the memory space data to the freed queue
+    pub fn free_memory(&mut self, address: usize) -> Result<(), Error> {
+        if let Some(position) = self.used.iter().position(|x| x.0 == address) {
+            self.freed.push(self.used.remove(position));
+        }
+
+        Ok(())
+    }
+
     pub fn store_pcb(&mut self, pcb: PCB) -> Result<(), Error> {
         let bytes: Vec<u8> = pcb.into();
         // No PCB has been stored
@@ -74,7 +89,7 @@ impl Memory {
 
             let next_address = address + data_size;
             let available_space = self.os_segment_size - next_address;
-            //println!("available_space {} bytes {}", available_space, bytes.len());
+
             if available_space > bytes.len() {
                 self.data[next_address..next_address + bytes.len()].copy_from_slice(&bytes[..]);
                 self.pcb_table.push((pcb.id, next_address, bytes.len()));

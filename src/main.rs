@@ -34,12 +34,12 @@ struct Emulator {
     display_content: String,
     // List of processes waiting because of an interupt
     waiting_queue: Vec<(usize, usize, usize)>,
-    loaded_files: Vec<(String, usize)>,
+    // (file_name, pcb_id)
+    loaded_files: Vec<(String, Option<usize>)>,
     theme: Theme,
     show_stats: bool,
     start_time: Option<Instant>,
     total_start_time: Option<Instant>,
-    
 }
 
 #[derive(PartialEq)]
@@ -127,7 +127,7 @@ impl Emulator {
             Message::StatsPressed => {
                 self.show_stats = !self.show_stats;
                 Task::none()
-            },
+            }
             // Saves the files content to storage
             Message::StoreFiles(Ok(files)) => {
                 for (file_name, data) in files {
@@ -162,7 +162,7 @@ impl Emulator {
                 } else {
                     self.mode = Some(Mode::Manual);
                 }
-                // Registrar el tiempo cuando 
+                // Registrar el tiempo cuando
                 if self.start_time.is_none() {
                     self.total_start_time = Some(Instant::now());
                     println!("Procesamiento iniciado.");
@@ -186,10 +186,14 @@ impl Emulator {
                             self.memory.pcb_table.iter().enumerate()
                         {
                             let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
-                            if pcb.process_state == ProcessState::New {
+                            if pcb.process_state == ProcessState::New
+                                || pcb.process_state == ProcessState::Ready
+                            {
                                 let mut list = vec![0; self.config.cpu_quantity];
+                                // Repeat until all CPUs have been checked
                                 while list.iter().sum::<usize>() < self.config.cpu_quantity {
                                     let r_i = rng.gen_range(0..self.config.cpu_quantity);
+                                    // Assign the process to free CPU
                                     if let Some((_, p)) = self.cpus.get(r_i) {
                                         if p.is_none() {
                                             return Task::done(Message::Distpacher((
@@ -215,7 +219,6 @@ impl Emulator {
             }
             Message::Distpacher((cpu_index, (pcb_id, address, size))) => {
                 if let Some((cpu, p)) = self.cpus.get_mut(cpu_index) {
-
                     // Context switch, load registers to the CPU
                     let mut pcb = PCB::from(&self.memory.data[address..address + size]);
                     cpu.ax = pcb.ax;
@@ -227,15 +230,12 @@ impl Emulator {
                     cpu.sp = pcb.sp;
                     cpu.ir = pcb.ir;
                     cpu.z = pcb.z;
-                    
+
                     // Inicia el conteo de tiempo para este proceso
                     cpu.start_time = Some(Instant::now());
 
                     // Mostrar mensaje en consola al iniciar el procesamiento de un proceso
-                    println!(
-                        "Asignando proceso con ID: {} en CPU {}",
-                        pcb_id, cpu_index
-                    );
+                    println!("Asignando proceso con ID: {} en CPU {}", pcb_id, cpu_index);
 
                     if self.mode.is_none() {
                         self.mode = Some(Mode::Manual);
@@ -246,7 +246,7 @@ impl Emulator {
                     // Save changes
                     let bytes: Vec<u8> = pcb.into();
                     self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
-
+                    // Update the CPU running process id
                     *p = Some(pcb_id);
                 }
                 Task::none()
@@ -261,7 +261,10 @@ impl Emulator {
                         {
                             let mut pcb = PCB::from(&self.memory.data[*address..*address + *size]);
                             // Mostrar mensaje en consola cuando el proceso finaliza
-                            println!("Proceso con ID: {} ha finalizado en CPU {}", p_id, cpu_index);
+                            println!(
+                                "Proceso con ID: {} ha finalizado en CPU {}",
+                                p_id, cpu_index
+                            );
 
                             // Calcular el tiempo transcurrido desde que se inició el proceso
                             if let Some(start_time) = cpu.start_time {
@@ -273,10 +276,8 @@ impl Emulator {
                                 cpu.start_time = None; // Limpiar el tiempo de inicio del proceso
                             }
 
-                       
-
                             // Update PCB
-                            pcb.process_state = ProcessState::Terminated;                          
+                            pcb.process_state = ProcessState::Terminated;
                             pcb.ax = cpu.ax;
                             pcb.bx = cpu.bx;
                             pcb.cx = cpu.cx;
@@ -290,21 +291,31 @@ impl Emulator {
                             let bytes: Vec<u8> = pcb.into();
                             self.memory.data[*address..*address + *size]
                                 .copy_from_slice(&bytes[..]);
+
+                            // Free memory
+                            self.memory.free_memory(pcb.code_segment);
+                            self.memory.free_memory(pcb.stack_segment);
+
                             // Remove from pcb_table
-                            self.memory.pcb_table.retain(|x| x.0 != *p_id);
+                            //self.memory.pcb_table.retain(|x| x.0 != *p_id);
+
+                            if let Some((_, p_id)) =
+                                self.loaded_files.iter_mut().find(|x| x.1 == Some(*p_id))
+                            {
+                                *p_id = None;
+                            }
 
                             *id = None;
                             *cpu = CPU::new();
-                            // Free memory TODO!()
 
                             // Verificar si todos los procesos han terminado
                             if self.memory.pcb_table.is_empty() {
                                 if let Some(total_start_time) = self.total_start_time {
                                     let total_duration = total_start_time.elapsed();
                                     println!("\n Análisis completo. Tiempo total del análisis: {:.2?} segundos", total_duration);
-                                    self.total_start_time = None; 
+                                    self.total_start_time = None;
                                 }
-                            } 
+                            }
                         }
                     }
                 }
@@ -680,33 +691,31 @@ impl Emulator {
             let scheduler_text = match self.config.scheduler {
                 Some(scheduler) => rich_text([
                     span("Método seleccionado es: "),
-                    span(scheduler.to_string()).size(22).color(color!(0x9E69E3)),  
+                    span(scheduler.to_string()).size(22).color(color!(0x9E69E3)),
                 ]),
-                None => rich_text([span("No hay método seleccionado.")]), 
+                None => rich_text([span("No hay método seleccionado.")]),
             };
             let stats_view = column![
-                container (
-                    text("Sección de Estadísticas del Sistema").size(30),
-                )
-                .padding(10).style(container::rounded_box).width(iced::Length::Fill).center_x(iced::Length::Fill),
-                widget::Space::with_height(iced::Length::Fixed(20.0)),                
-                scheduler_text, 
+                container(text("Sección de Estadísticas del Sistema").size(30),)
+                    .padding(10)
+                    .style(container::rounded_box)
+                    .width(iced::Length::Fill)
+                    .center_x(iced::Length::Fill),
+                widget::Space::with_height(iced::Length::Fixed(20.0)),
+                scheduler_text,
                 widget::Space::with_height(iced::Length::Fill),
                 row![
-                    widget::Space::with_width(iced::Length::Fill), 
+                    widget::Space::with_width(iced::Length::Fill),
                     button("Volver")
-                    .on_press(Message::StatsPressed)
-                    .width(iced::Length::Shrink),
+                        .on_press(Message::StatsPressed)
+                        .width(iced::Length::Shrink),
                 ]
-                       
             ]
-
             .padding(20);
 
             return container(stats_view)
                 .width(iced::Length::Fill)
                 .height(iced::Length::Fill)
-
                 .into();
         }
         // Menu bar
@@ -736,7 +745,7 @@ impl Emulator {
         let mut files = column![].padding([5, 10]);
         for (index, (file_name, _, _)) in self.storage.used.iter().enumerate() {
             if let Some((file, p_id)) = self.loaded_files.iter().find(|x| x.0 == *file_name) {
-                if self.cpus.iter().any(|x| x.1 == Some(*p_id)) {
+                if self.cpus.iter().any(|x| x.1 == *p_id) && *p_id != None {
                     if file_name == file {
                         files = files.push(rich_text([
                             span(index).font(Font {
@@ -981,7 +990,7 @@ fn binary_display(bytes: &[u8]) -> Container<'static, Message> {
 fn create_pcbs(
     storage: &mut Storage,
     memory: &mut Memory,
-    loaded_files: &mut Vec<(String, usize)>,
+    loaded_files: &mut Vec<(String, Option<usize>)>,
 ) -> Option<Task<Message>> {
     // Before selecting the process to execute we have to make sure that PCBs have been created
     // Check the list of stored files
@@ -1060,7 +1069,7 @@ fn create_pcbs(
                     Err(_) => todo!(),
                 }
 
-                loaded_files.push((file_name.to_string(), new_pcb.id));
+                loaded_files.push((file_name.to_string(), Some(new_pcb.id)));
             }
         }
     }
