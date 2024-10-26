@@ -293,8 +293,8 @@ impl Emulator {
                                 .copy_from_slice(&bytes[..]);
 
                             // Free memory
-                            self.memory.free_memory(pcb.code_segment);
-                            self.memory.free_memory(pcb.stack_segment);
+                            let _ = self.memory.free_memory(pcb.code_segment);
+                            let _ = self.memory.free_memory(pcb.stack_segment);
 
                             // Remove from pcb_table
                             //self.memory.pcb_table.retain(|x| x.0 != *p_id);
@@ -309,12 +309,13 @@ impl Emulator {
                             *cpu = CPU::new();
 
                             // Verificar si todos los procesos han terminado
-                            if self.memory.pcb_table.is_empty() {
+                            if self.cpus.iter().map(|x| x.1.is_none()).all(|x| x) {
                                 if let Some(total_start_time) = self.total_start_time {
                                     let total_duration = total_start_time.elapsed();
                                     println!("\n Análisis completo. Tiempo total del análisis: {:.2?} segundos", total_duration);
                                     self.total_start_time = None;
                                 }
+                                self.mode = None;
                             }
                         }
                     }
@@ -677,7 +678,14 @@ impl Emulator {
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        let mut play_button = button("Play/Pause");
+        let mut play_button = if self.mode == Some(Mode::Manual) {
+            button("Play")
+        } else if self.mode == Some(Mode::Automatic) {
+            button("Pause")
+        } else {
+            button("Play/Pause")
+        };
+
         let mut next_button = button("Next");
         let stats_button = button("Stats").on_press(Message::StatsPressed);
         if self.mode == Some(Mode::Manual) {
@@ -745,7 +753,7 @@ impl Emulator {
         let mut files = column![].padding([5, 10]);
         for (index, (file_name, _, _)) in self.storage.used.iter().enumerate() {
             if let Some((file, p_id)) = self.loaded_files.iter().find(|x| x.0 == *file_name) {
-                if self.cpus.iter().any(|x| x.1 == *p_id) && *p_id != None {
+                if self.cpus.iter().any(|x| x.1 == *p_id) && p_id.is_some() {
                     if file_name == file {
                         files = files.push(rich_text([
                             span(index).font(Font {
@@ -915,7 +923,7 @@ fn pcb_display(pcb: &PCB) -> Tooltip<'static, Message> {
             )),
         ])
         .padding([10, 10])
-        .style(container::bordered_box),
+        .style(|_| container::background(color!(0x5a5e77))),
         tooltip::Position::Top,
     )
 }

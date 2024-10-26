@@ -29,6 +29,7 @@ impl Memory {
         if !self.freed.is_empty() && !self.used.is_empty() {
             for (i, (address, m_size)) in self.freed.clone().iter_mut().enumerate() {
                 if size == *m_size {
+                    println!("{:?} {:?}", &size, &m_size);
                     self.data[*address..*address + size].copy_from_slice(&data[..]);
                     self.used.push(self.freed.remove(i));
                     return Ok((*address, *m_size));
@@ -42,9 +43,9 @@ impl Memory {
                 self.data[self.os_segment_size..self.os_segment_size + size]
                     .copy_from_slice(&data[..]);
                 self.used.push((self.os_segment_size, size));
-                return Ok((self.os_segment_size, size));
+                Ok((self.os_segment_size, size))
             } else {
-                return Err(Error::NotEnoughUserMemory);
+                Err(Error::NotEnoughUserMemory)
             }
         } else {
             // Last used memory information
@@ -57,9 +58,9 @@ impl Memory {
             if available_space > size {
                 self.data[next_address..next_address + size].copy_from_slice(&data[..]);
                 self.used.push((next_address, size));
-                return Ok((next_address, size));
+                Ok((next_address, size))
             } else {
-                return Err(Error::NotEnoughUserMemory);
+                Err(Error::NotEnoughUserMemory)
             }
         }
     }
@@ -68,6 +69,10 @@ impl Memory {
     pub fn free_memory(&mut self, address: usize) -> Result<(), Error> {
         if let Some(position) = self.used.iter().position(|x| x.0 == address) {
             self.freed.push(self.used.remove(position));
+        }
+
+        if self.used.is_empty() {
+            self.freed.clear();
         }
 
         Ok(())
