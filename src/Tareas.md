@@ -1,14 +1,14 @@
 - [ ] agregarle algoritmos de
 planificación de la CPU
-    - [ ] FCFS
+    - [x] FCFS
     - [ ] SRT
-    - [ ] SJF
+    - [x] SJF
     - [ ] RR
     - [ ] HRRN
-- [ ] Agregar la funcionalidad para conocer el tamaño de ráfaga y tiempo de llegada
+- [x] Agregar la funcionalidad para conocer el tamaño de ráfaga y tiempo de llegada
 - [ ] La ráfaga será la cantidad de líneas a procesar de cada archivo
 - [x] Cada línea del archivo representa una posición en memoria
-- [ ] Una vez cargado los archivos, debe existir una opción para agregar los tiempos de llegada para
+- [x] Una vez cargado los archivos, debe existir una opción para agregar los tiempos de llegada para
 cada proceso asignado en el CPU (manual y automático (random de 1 a 5)), esto será similar a
 los ejercicios realizados.
 - [ ] El tiempo inicial del primer archivo por defecto será de 1
