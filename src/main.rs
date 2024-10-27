@@ -24,6 +24,18 @@ fn main() -> iced::Result {
         .run_with(Emulator::new)
 }
 
+#[derive(Default, Debug, Clone)]
+struct Timing {
+    p_id: usize,
+    c_id: Option<usize>,
+    burst: usize,
+    arrival: Option<Instant>,
+    start: Option<Instant>,
+    execution: Option<Instant>,
+    initial_burst: usize,
+    remaining_burst: usize,
+}
+
 #[derive(Default)]
 struct Emulator {
     cpus: Vec<(CPU, Option<usize>)>,
@@ -36,6 +48,8 @@ struct Emulator {
     waiting_queue: Vec<(usize, usize, usize)>,
     // (file_name, pcb_id)
     loaded_files: Vec<(String, Option<usize>)>,
+    // Scheduler diagram
+    diagram: Vec<Timing>,
     theme: Theme,
     show_stats: bool,
     start_time: Option<Instant>,
@@ -65,6 +79,7 @@ enum Message {
     ChangeMode,
     SchedulerSelected(Scheduler),
     StatsPressed,
+    ResetPressed,
 }
 
 impl Emulator {
@@ -100,6 +115,7 @@ impl Emulator {
                 theme: iced::Theme::Dracula,
                 waiting_queue: vec![],
                 loaded_files: vec![],
+                diagram: vec![],
                 config,
                 start_time: None,
                 total_start_time: None,
@@ -126,6 +142,20 @@ impl Emulator {
             }
             Message::StatsPressed => {
                 self.show_stats = !self.show_stats;
+                Task::none()
+            }
+            Message::ResetPressed => {
+                self.storage = Storage::new(self.config.storage);
+                self.memory = Memory::new(self.config.memory, self.config.os_segment);
+                self.cpus = vec![(CPU::new(), None); self.config.cpu_quantity];
+                self.mode = None;
+                self.display_content = "".to_string();
+                self.waiting_queue = vec![];
+                self.loaded_files = vec![];
+                self.diagram = vec![];
+                self.start_time = None;
+                self.total_start_time = None;
+
                 Task::none()
             }
             // Saves the files content to storage
@@ -171,9 +201,12 @@ impl Emulator {
             }
             // The Scheduler of the OS, it will select the next process to execute and send it to the distpacher
             Message::Scheduler => {
-                if let Some(task) =
-                    create_pcbs(&mut self.storage, &mut self.memory, &mut self.loaded_files)
-                {
+                if let Some(task) = create_pcbs(
+                    &mut self.storage,
+                    &mut self.memory,
+                    &mut self.loaded_files,
+                    &mut self.diagram,
+                ) {
                     return task;
                 }
                 // Uses the scheduler algo selected on config
@@ -181,10 +214,7 @@ impl Emulator {
                 match self.config.scheduler {
                     Some(Scheduler::FCFS) => {
                         // Select the pcb from the table and send to distpacher
-                        // Aqui irian los algorithmos del scheduler
-                        for (_i, (pcb_id, address, size)) in
-                            self.memory.pcb_table.iter().enumerate()
-                        {
+                        for (pcb_id, address, size) in self.memory.pcb_table.iter() {
                             let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
                             if pcb.process_state == ProcessState::New
                                 || pcb.process_state == ProcessState::Ready
@@ -210,8 +240,49 @@ impl Emulator {
                         }
                         Task::none()
                     }
-                    Some(Scheduler::SRT) => Task::none(),
-                    Some(Scheduler::SJF) => Task::none(),
+                    Some(Scheduler::SRT) => {
+                        //println!("{:#?}", self.diagram);
+                        Task::none()
+                    }
+                    Some(Scheduler::SJF) => {
+                        // Sort the pcbs by arrival and burst time
+                        self.diagram.sort_by_key(|a| a.burst);
+                        // Select the pcb from the table and send to distpacher
+                        for pcb_timing in self.diagram.iter_mut() {
+                            if let Some((pcb_id, address, size)) = self
+                                .memory
+                                .pcb_table
+                                .iter()
+                                .find(|x| x.0 == pcb_timing.p_id)
+                            {
+                                // Read the PCB from memory
+                                let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
+                                if pcb.process_state == ProcessState::New ||
+                                pcb.process_state == ProcessState::Ready
+                                {
+                                    let mut list = vec![0; self.config.cpu_quantity];
+                                    // Repeat until all CPUs have been checked
+                                    while list.iter().sum::<usize>() < self.config.cpu_quantity {
+                                        let r_i = rng.gen_range(0..self.config.cpu_quantity);
+                                        // Assign the process to free CPU
+                                        if let Some((_, p)) = self.cpus.get(r_i) {
+                                            if p.is_none() {
+                                                return Task::done(Message::Distpacher((
+                                                    r_i,
+                                                    (*pcb_id, *address, *size),
+                                                )))
+                                                .chain(Task::done(Message::Scheduler));
+                                            } else {
+                                                list[r_i] = 1;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        //println!("{:#?}", self.diagram);
+                        Task::none()
+                    }
                     Some(Scheduler::RR) => Task::none(),
                     Some(Scheduler::HRRN) => Task::none(),
                     None => Task::none(),
@@ -236,6 +307,9 @@ impl Emulator {
 
                     // Mostrar mensaje en consola al iniciar el procesamiento de un proceso
                     println!("Asignando proceso con ID: {} en CPU {}", pcb_id, cpu_index);
+                    if let Some(timing) = self.diagram.iter_mut().find(|x| x.p_id == pcb_id) {
+                        timing.c_id = Some(cpu_index);
+                    }
 
                     if self.mode.is_none() {
                         self.mode = Some(Mode::Manual);
@@ -688,6 +762,7 @@ impl Emulator {
 
         let mut next_button = button("Next");
         let stats_button = button("Stats").on_press(Message::StatsPressed);
+        let reset_button = button("Reset").on_press(Message::ResetPressed);
         if self.mode == Some(Mode::Manual) {
             next_button = next_button.on_press(Message::Tick);
         }
@@ -731,6 +806,7 @@ impl Emulator {
             button("File").on_press(Message::OpenFile),
             play_button,
             next_button,
+            reset_button,
             stats_button,
             pick_list(
                 [
@@ -811,7 +887,8 @@ impl Emulator {
         let mut pcbs_display = row![].spacing(5);
         for (_, address, size) in &self.memory.pcb_table {
             let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
-            pcbs_display = pcbs_display.push(pcb_display(&pcb));
+            let timing = self.diagram.iter().find(|x| x.p_id == pcb.id);
+            pcbs_display = pcbs_display.push(pcb_display(&pcb,timing));
         }
 
         widget::container(column![
@@ -856,8 +933,10 @@ impl Emulator {
     }
 }
 
-fn pcb_display(pcb: &PCB) -> Tooltip<'static, Message> {
+fn pcb_display(pcb: &PCB, timing: Option<&Timing>) -> Tooltip<'static, Message> {
+    //println!("{:?}", timing.unwrap());
     tooltip(
+        // PCB container
         container(
             row![
                 rich_text([span(pcb.id)
@@ -884,8 +963,10 @@ fn pcb_display(pcb: &PCB) -> Tooltip<'static, Message> {
         .height(40)
         .padding([10, 10])
         .style(container::rounded_box),
+        // Tooltip content container
         container(column![
             row![
+            // ID
                 rich_text([
                     span("ID: "),
                     span(pcb.id)
@@ -895,7 +976,8 @@ fn pcb_display(pcb: &PCB) -> Tooltip<'static, Message> {
                         })
                         .color(color!(0x1ef956))
                 ]),
-                widget::Space::new(80, iced::Length::Shrink),
+                widget::Space::new(100, iced::Length::Shrink),
+                // Priority
                 rich_text([
                     span("Priority: "),
                     span(pcb.priority).font(Font {
@@ -904,15 +986,21 @@ fn pcb_display(pcb: &PCB) -> Tooltip<'static, Message> {
                     })
                 ])
             ],
+            row![
+            // Process State
             rich_text([
                 span("State: "),
                 span(format!("{:?}", pcb.process_state))
-                    .font(Font {
-                        weight: font::Weight::Bold,
-                        ..Font::default()
-                    })
-                    .color(color!(0xbd93f9))
-            ]),
+                .font(Font {
+                    weight: font::Weight::Bold,
+                    ..Font::default()
+                })
+                .color(color!(0xbd93f9))
+                ]),
+            widget::Space::new(20, iced::Length::Shrink),
+            text(format!(
+                "Burst Time: {}", timing.unwrap().burst)),
+            ],
             text(format!(
                 "Code Segment: [{}; {}]",
                 &pcb.code_segment, &pcb.code_segment_size
@@ -999,14 +1087,15 @@ fn create_pcbs(
     storage: &mut Storage,
     memory: &mut Memory,
     loaded_files: &mut Vec<(String, Option<usize>)>,
+    diagram: &mut Vec<Timing>,
 ) -> Option<Task<Message>> {
     // Before selecting the process to execute we have to make sure that PCBs have been created
     // Check the list of stored files
     for (file_name, address, data_size) in &storage.used {
         // We only load 5 files at a time
-        if memory.pcb_table.len() == 5 {
+        /*if memory.pcb_table.len() == 5 {
             break;
-        }
+        }*/
         if loaded_files.iter().any(|x| x.0 == *file_name) {
             // File already loaded , so we can ignore it
         }
@@ -1078,10 +1167,24 @@ fn create_pcbs(
                 }
 
                 loaded_files.push((file_name.to_string(), Some(new_pcb.id)));
+
+                diagram.push(Timing {
+                    p_id: new_pcb.id,
+                    burst: new_pcb.code_segment_size,
+                    remaining_burst: new_pcb.code_segment_size,
+                    arrival: Some(random_arrival()),
+                    ..Default::default()
+                });
             }
         }
     }
     None
+}
+
+fn random_arrival() -> Instant {
+    let base_time = Instant::now();
+    let random_offset = rand::thread_rng().gen_range(1..=5); // Random offset in milliseconds
+    base_time + Duration::from_millis(random_offset)
 }
 
 // Reads the content of the selected files and groups the file name with the file content

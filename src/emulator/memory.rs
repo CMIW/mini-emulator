@@ -68,11 +68,13 @@ impl Memory {
     // Move the memory space data to the freed queue
     pub fn free_memory(&mut self, address: usize) -> Result<(), Error> {
         if let Some(position) = self.used.iter().position(|x| x.0 == address) {
-            self.freed.push(self.used.remove(position));
-        }
-
-        if self.used.is_empty() {
-            self.freed.clear();
+            let space = self.used.remove(position);
+            // Set memory to 0
+            self.data[space.0..space.0 + space.1].copy_from_slice(&vec![0; space.1]);
+            self.freed.push(space);
+            if self.used.is_empty() {
+                self.freed.clear();
+            }
         }
 
         Ok(())
