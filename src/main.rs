@@ -26,13 +26,13 @@ fn main() -> iced::Result {
 
 #[derive(Default, Debug, Clone)]
 struct Timing {
-    p_id: usize,                // Process ID
-    c_id: Option<usize>,        // CPU ID (if assigned to a CPU)
-    burst: usize,               // Total burst time required
-    arrival: u8,                // Arrival time of the process
-    start: Option<Instant>,     // Actual start time of the process
-    execution: Option<Duration>,// Time when process was last executed
-    remaining_burst: usize,     // Remaining burst time (updated during execution)
+    p_id: usize,                 // Process ID
+    c_id: Option<usize>,         // CPU ID (if assigned to a CPU)
+    burst: usize,                // Total burst time required
+    arrival: u8,                 // Arrival time of the process
+    start: Option<Instant>,      // Actual start time of the process
+    execution: Option<Duration>, // Time when process was last executed
+    remaining_burst: usize,      // Remaining burst time (updated during execution)
 }
 
 #[derive(Default)]
@@ -240,7 +240,61 @@ impl Emulator {
                         Task::none()
                     }
                     Some(Scheduler::SRT) => {
-                        //println!("{:#?}", self.diagram);
+                        // Sort the pcbs by arrival and burst time
+                        self.diagram.sort_by_key(|a| a.remaining_burst);
+                        // Select the pcb from the table and send to distpacher
+                        for pcb_timing in self.diagram.iter() {
+                            if pcb_timing.c_id.is_none() {
+                                println!("sup 0");
+                                if let Some((pcb_id, address, size)) = self
+                                .memory
+                                .pcb_table
+                                .iter()
+                                .find(|x| x.0 == pcb_timing.p_id)
+                                {
+                                    // Read the PCB from memory
+                                    let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
+                                    if pcb.process_state == ProcessState::New
+                                    || pcb.process_state == ProcessState::Ready
+                                    {
+                                        if self.cpus.iter().any(|x| x.1.is_none()) {
+                                            let mut list = vec![0; self.config.cpu_quantity];
+                                            // Repeat until all CPUs have been checked
+                                            while list.iter().sum::<usize>() < self.config.cpu_quantity {
+                                                let r_i = rng.gen_range(0..self.config.cpu_quantity);
+                                                // Assign the process to free CPU
+                                                if let Some((_, p)) = self.cpus.get(r_i) {
+                                                    if p.is_none() {
+                                                        return Task::done(Message::Distpacher((
+                                                            r_i,
+                                                            (*pcb_id, *address, *size),
+                                                        )))
+                                                        .chain(Task::done(Message::Scheduler));
+                                                    } else {
+                                                        list[r_i] = 1;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        else {
+                                            println!("hey 0");
+                                            let r_i = rng.gen_range(0..self.config.cpu_quantity);
+                                            if let Some((_, p)) = self.cpus.get(r_i) {
+                                                if let Some(old_timing) = self.diagram.iter().find(|x| x.p_id == p.unwrap()) {
+                                                    if old_timing.remaining_burst > pcb_timing.remaining_burst {
+                                                        return Task::done(Message::Distpacher((
+                                                            r_i,
+                                                            (*pcb_id, *address, *size),
+                                                        )))
+                                                        .chain(Task::done(Message::Scheduler));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         Task::none()
                     }
                     Some(Scheduler::SJF) => {
@@ -289,6 +343,39 @@ impl Emulator {
             }
             Message::Distpacher((cpu_index, (pcb_id, address, size))) => {
                 if let Some((cpu, p)) = self.cpus.get_mut(cpu_index) {
+                    if let Some(p_id) = p {
+                        // Context switch
+                        // Store CPU content on the PCB
+                        if let Some((_, old_address, old_size)) =
+                            self.memory.pcb_table.iter().find(|x| x.0 == *p_id)
+                        {
+                            let mut pcb = PCB::from(
+                                &self.memory.data[*old_address..*old_address + *old_size],
+                            );
+                            pcb.ax = cpu.ax;
+                            cpu.bx = pcb.bx;
+                            pcb.cx = cpu.cx;
+                            pcb.dx = cpu.dx;
+                            pcb.ac = cpu.ac;
+                            pcb.pc = cpu.pc;
+                            pcb.sp = cpu.sp;
+                            pcb.ir = cpu.ir;
+                            pcb.z = cpu.z;
+
+                            pcb.process_state = ProcessState::Ready;
+
+                            // Save changes
+                            let bytes: Vec<u8> = pcb.into();
+                            self.memory.data[*old_address..*old_address + *old_size]
+                                .copy_from_slice(&bytes[..]);
+
+                            if let Some(timing) = self.diagram.iter_mut().find(|x| x.p_id == *p_id)
+                            {
+                                timing.c_id = None;
+                            }
+                        }
+                    }
+
                     // Context switch, load registers to the CPU
                     let mut pcb = PCB::from(&self.memory.data[address..address + size]);
                     cpu.ax = pcb.ax;
@@ -300,6 +387,13 @@ impl Emulator {
                     cpu.sp = pcb.sp;
                     cpu.ir = pcb.ir;
                     cpu.z = pcb.z;
+
+                    pcb.process_state = ProcessState::Running;
+
+                    // Save changes
+                    let bytes: Vec<u8> = pcb.into();
+                    self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
+
 
                     // Inicia el conteo de tiempo para este proceso
                     cpu.start_time = Some(Instant::now());
@@ -316,11 +410,6 @@ impl Emulator {
                         self.mode = Some(Mode::Manual);
                     }
 
-                    pcb.process_state = ProcessState::Running;
-
-                    // Save changes
-                    let bytes: Vec<u8> = pcb.into();
-                    self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
                     // Update the CPU running process id
                     *p = Some(pcb_id);
                 }
@@ -942,6 +1031,17 @@ impl Emulator {
     }
 }
 
+fn color_square() -> Container<'static, Message> {
+    container("")
+        .width(20)
+        .height(20)
+        .style(|_| container::background(color!(0x9afcb3)))
+}
+
+fn square() -> Container<'static, Message> {
+    container("").width(20).height(20)
+}
+
 fn pcb_display(pcb: &PCB, timing: Option<&Timing>) -> Tooltip<'static, Message> {
     //println!("{:?}", timing.unwrap());
     tooltip(
@@ -1015,7 +1115,10 @@ fn pcb_display(pcb: &PCB, timing: Option<&Timing>) -> Tooltip<'static, Message> 
             )),
             text(format!("Arrival: {}", timing.unwrap().arrival)),
             text(format!("Burst: {}", timing.unwrap().burst)),
-            text(format!("Remaining Burst: {}", timing.unwrap().remaining_burst)),
+            text(format!(
+                "Remaining Burst: {}",
+                timing.unwrap().remaining_burst
+            )),
             if let Some(execution) = timing.unwrap().execution {
                 text(format!("Execution Time: {}", execution.as_secs()))
             } else {
@@ -1090,7 +1193,7 @@ fn binary_display(bytes: &[u8]) -> Container<'static, Message> {
     }
 
     container(scrollable(column).width(iced::Length::Fill))
-        .height(335)
+        .height(iced::Length::Fill)
         .width(320)
         .style(container::rounded_box)
 }
@@ -1185,7 +1288,7 @@ fn create_pcbs(
                     p_id: new_pcb.id,
                     burst: num_instructions,
                     remaining_burst: num_instructions,
-                    arrival:  rand::thread_rng().gen_range(1..=5),
+                    arrival: rand::thread_rng().gen_range(1..=5),
                     ..Default::default()
                 });
             }
