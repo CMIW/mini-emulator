@@ -26,14 +26,13 @@ fn main() -> iced::Result {
 
 #[derive(Default, Debug, Clone)]
 struct Timing {
-    p_id: usize,
-    c_id: Option<usize>,
-    burst: usize,
-    arrival: Option<Instant>,
-    start: Option<Instant>,
-    execution: Option<Instant>,
-    initial_burst: usize,
-    remaining_burst: usize,
+    p_id: usize,                // Process ID
+    c_id: Option<usize>,        // CPU ID (if assigned to a CPU)
+    burst: usize,               // Total burst time required
+    arrival: u8,                // Arrival time of the process
+    start: Option<Instant>,     // Actual start time of the process
+    execution: Option<Duration>,// Time when process was last executed
+    remaining_burst: usize,     // Remaining burst time (updated during execution)
 }
 
 #[derive(Default)]
@@ -257,8 +256,8 @@ impl Emulator {
                             {
                                 // Read the PCB from memory
                                 let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
-                                if pcb.process_state == ProcessState::New ||
-                                pcb.process_state == ProcessState::Ready
+                                if pcb.process_state == ProcessState::New
+                                    || pcb.process_state == ProcessState::Ready
                                 {
                                     let mut list = vec![0; self.config.cpu_quantity];
                                     // Repeat until all CPUs have been checked
@@ -307,8 +306,10 @@ impl Emulator {
 
                     // Mostrar mensaje en consola al iniciar el procesamiento de un proceso
                     println!("Asignando proceso con ID: {} en CPU {}", pcb_id, cpu_index);
+                    // Updates times
                     if let Some(timing) = self.diagram.iter_mut().find(|x| x.p_id == pcb_id) {
                         timing.c_id = Some(cpu_index);
+                        timing.start = Some(Instant::now());
                     }
 
                     if self.mode.is_none() {
@@ -343,6 +344,9 @@ impl Emulator {
                             // Calcular el tiempo transcurrido desde que se inició el proceso
                             if let Some(start_time) = cpu.start_time {
                                 let duration = start_time.elapsed();
+                                /*if let Some(timing) = self.diagram.iter_mut().find(|x| x.p_id == *p_id) {
+                                    timing.execution = Some(duration);
+                                }*/
                                 println!(
                                     "Tiempo transcurrido para el proceso con ID: {}: {:.2?} segundos",
                                     p_id, duration
@@ -722,6 +726,11 @@ impl Emulator {
                             }
                         }
 
+                        if let Some(timing) = self.diagram.iter_mut().find(|x| Some(x.p_id) == *p) {
+                            timing.remaining_burst -= 1;
+                            timing.execution = Some(timing.start.unwrap().elapsed());
+                        }
+
                         cpu.pc += 6;
                     }
                 }
@@ -888,7 +897,7 @@ impl Emulator {
         for (_, address, size) in &self.memory.pcb_table {
             let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
             let timing = self.diagram.iter().find(|x| x.p_id == pcb.id);
-            pcbs_display = pcbs_display.push(pcb_display(&pcb,timing));
+            pcbs_display = pcbs_display.push(pcb_display(&pcb, timing));
         }
 
         widget::container(column![
@@ -966,7 +975,7 @@ fn pcb_display(pcb: &PCB, timing: Option<&Timing>) -> Tooltip<'static, Message> 
         // Tooltip content container
         container(column![
             row![
-            // ID
+                // ID
                 rich_text([
                     span("ID: "),
                     span(pcb.id)
@@ -986,21 +995,16 @@ fn pcb_display(pcb: &PCB, timing: Option<&Timing>) -> Tooltip<'static, Message> 
                     })
                 ])
             ],
-            row![
             // Process State
             rich_text([
                 span("State: "),
                 span(format!("{:?}", pcb.process_state))
-                .font(Font {
-                    weight: font::Weight::Bold,
-                    ..Font::default()
-                })
-                .color(color!(0xbd93f9))
-                ]),
-            widget::Space::new(20, iced::Length::Shrink),
-            text(format!(
-                "Burst Time: {}", timing.unwrap().burst)),
-            ],
+                    .font(Font {
+                        weight: font::Weight::Bold,
+                        ..Font::default()
+                    })
+                    .color(color!(0xbd93f9))
+            ]),
             text(format!(
                 "Code Segment: [{}; {}]",
                 &pcb.code_segment, &pcb.code_segment_size
@@ -1009,6 +1013,14 @@ fn pcb_display(pcb: &PCB, timing: Option<&Timing>) -> Tooltip<'static, Message> 
                 "Stack Segment: [{}; {}]",
                 &pcb.stack_segment, &pcb.stack_segment_size
             )),
+            text(format!("Arrival: {}", timing.unwrap().arrival)),
+            text(format!("Burst: {}", timing.unwrap().burst)),
+            text(format!("Remaining Burst: {}", timing.unwrap().remaining_burst)),
+            if let Some(execution) = timing.unwrap().execution {
+                text(format!("Execution Time: {}", execution.as_secs()))
+            } else {
+                text("")
+            }
         ])
         .padding([10, 10])
         .style(|_| container::background(color!(0x5a5e77))),
@@ -1127,6 +1139,7 @@ fn create_pcbs(
             };
             // Create the PCB only if there is enough space in memory
             if instructions.len() + 5 <= memory.free_size() {
+                let num_instructions = instructions.len();
                 // Create new PCB
                 let next_id = memory.last_pcb_id() + 1;
                 let mut new_pcb = PCB::new(next_id);
@@ -1170,21 +1183,15 @@ fn create_pcbs(
 
                 diagram.push(Timing {
                     p_id: new_pcb.id,
-                    burst: new_pcb.code_segment_size,
-                    remaining_burst: new_pcb.code_segment_size,
-                    arrival: Some(random_arrival()),
+                    burst: num_instructions,
+                    remaining_burst: num_instructions,
+                    arrival:  rand::thread_rng().gen_range(1..=5),
                     ..Default::default()
                 });
             }
         }
     }
     None
-}
-
-fn random_arrival() -> Instant {
-    let base_time = Instant::now();
-    let random_offset = rand::thread_rng().gen_range(1..=5); // Random offset in milliseconds
-    base_time + Duration::from_millis(random_offset)
 }
 
 // Reads the content of the selected files and groups the file name with the file content
