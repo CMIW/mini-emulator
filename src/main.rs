@@ -53,6 +53,7 @@ struct Emulator {
     show_stats: bool,
     start_time: Option<Instant>,
     total_start_time: Option<Instant>,
+    quantum: Option<u8>,
 }
 
 #[derive(PartialEq)]
@@ -77,6 +78,7 @@ enum Message {
     Terminated(usize),
     ChangeMode,
     SchedulerSelected(Scheduler),
+    QuantumSelected(u8),
     StatsPressed,
     ResetPressed,
 }
@@ -118,6 +120,7 @@ impl Emulator {
                 config,
                 start_time: None,
                 total_start_time: None,
+                quantum: Some(1),
             },
             Task::none(),
         )
@@ -245,23 +248,26 @@ impl Emulator {
                         // Select the pcb from the table and send to distpacher
                         for pcb_timing in self.diagram.iter() {
                             if pcb_timing.c_id.is_none() {
-                                println!("sup 0");
                                 if let Some((pcb_id, address, size)) = self
-                                .memory
-                                .pcb_table
-                                .iter()
-                                .find(|x| x.0 == pcb_timing.p_id)
+                                    .memory
+                                    .pcb_table
+                                    .iter()
+                                    .find(|x| x.0 == pcb_timing.p_id)
                                 {
                                     // Read the PCB from memory
-                                    let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
+                                    let pcb =
+                                        PCB::from(&self.memory.data[*address..*address + *size]);
                                     if pcb.process_state == ProcessState::New
-                                    || pcb.process_state == ProcessState::Ready
+                                        || pcb.process_state == ProcessState::Ready
                                     {
                                         if self.cpus.iter().any(|x| x.1.is_none()) {
                                             let mut list = vec![0; self.config.cpu_quantity];
                                             // Repeat until all CPUs have been checked
-                                            while list.iter().sum::<usize>() < self.config.cpu_quantity {
-                                                let r_i = rng.gen_range(0..self.config.cpu_quantity);
+                                            while list.iter().sum::<usize>()
+                                                < self.config.cpu_quantity
+                                            {
+                                                let r_i =
+                                                    rng.gen_range(0..self.config.cpu_quantity);
                                                 // Assign the process to free CPU
                                                 if let Some((_, p)) = self.cpus.get(r_i) {
                                                     if p.is_none() {
@@ -275,13 +281,17 @@ impl Emulator {
                                                     }
                                                 }
                                             }
-                                        }
-                                        else {
-                                            println!("hey 0");
+                                        } else {
                                             let r_i = rng.gen_range(0..self.config.cpu_quantity);
                                             if let Some((_, p)) = self.cpus.get(r_i) {
-                                                if let Some(old_timing) = self.diagram.iter().find(|x| x.p_id == p.unwrap()) {
-                                                    if old_timing.remaining_burst > pcb_timing.remaining_burst {
+                                                if let Some(old_timing) = self
+                                                    .diagram
+                                                    .iter()
+                                                    .find(|x| x.p_id == p.unwrap())
+                                                {
+                                                    if old_timing.remaining_burst
+                                                        > pcb_timing.remaining_burst
+                                                    {
                                                         return Task::done(Message::Distpacher((
                                                             r_i,
                                                             (*pcb_id, *address, *size),
@@ -333,7 +343,6 @@ impl Emulator {
                                 }
                             }
                         }
-                        //println!("{:#?}", self.diagram);
                         Task::none()
                     }
                     Some(Scheduler::RR) => Task::none(),
@@ -393,7 +402,6 @@ impl Emulator {
                     // Save changes
                     let bytes: Vec<u8> = pcb.into();
                     self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
-
 
                     // Inicia el conteo de tiempo para este proceso
                     cpu.start_time = Some(Instant::now());
@@ -846,6 +854,15 @@ impl Emulator {
                 }
                 Task::none()
             }
+            Message::QuantumSelected(quantum) => {
+                match self.config.scheduler {
+                    Some(Scheduler::RR) => {
+                        self.quantum = Some(quantum);
+                    }
+                    _ => {}
+                }
+                Task::none()
+            }
         }
     }
 
@@ -916,6 +933,11 @@ impl Emulator {
                 ],
                 self.config.scheduler,
                 Message::SchedulerSelected
+            ),
+            pick_list(
+                [1,2,3,4,5,6,7,],
+                self.quantum,
+                Message::QuantumSelected
             ),
             widget::Space::new(iced::Length::Shrink, iced::Length::Fill)
         ]
@@ -1043,7 +1065,6 @@ fn square() -> Container<'static, Message> {
 }
 
 fn pcb_display(pcb: &PCB, timing: Option<&Timing>) -> Tooltip<'static, Message> {
-    //println!("{:?}", timing.unwrap());
     tooltip(
         // PCB container
         container(
