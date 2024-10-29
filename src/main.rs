@@ -54,6 +54,7 @@ struct Emulator {
     start_time: Option<Instant>,
     total_start_time: Option<Instant>,
     quantum: Option<u8>,
+    counter: u64,
 }
 
 #[derive(PartialEq)]
@@ -81,6 +82,7 @@ enum Message {
     QuantumSelected(u8),
     StatsPressed,
     ResetPressed,
+    TickScheduler,
 }
 
 impl Emulator {
@@ -121,6 +123,7 @@ impl Emulator {
                 start_time: None,
                 total_start_time: None,
                 quantum: Some(1),
+                counter: 0,
             },
             Task::none(),
         )
@@ -157,6 +160,7 @@ impl Emulator {
                 self.diagram = vec![];
                 self.start_time = None;
                 self.total_start_time = None;
+                self.counter = 0;
 
                 Task::none()
             }
@@ -345,7 +349,45 @@ impl Emulator {
                         }
                         Task::none()
                     }
-                    Some(Scheduler::RR) => Task::none(),
+                    Some(Scheduler::RR) => {
+                        for (pcb_id, address, size) in self.memory.pcb_table.iter() {
+                            let pcb = PCB::from(&self.memory.data[*address..*address + *size]);
+                            if pcb.process_state == ProcessState::New
+                                || pcb.process_state == ProcessState::Ready
+                            {
+                                if self.cpus.iter().any(|x| x.1.is_none()) {
+                                    println!("======== 1 ========");
+                                    let mut list = vec![0; self.config.cpu_quantity];
+                                    // Repeat until all CPUs have been checked
+                                    while list.iter().sum::<usize>() < self.config.cpu_quantity {
+                                        let r_i = rng.gen_range(0..self.config.cpu_quantity);
+                                        // Assign the process to free CPU
+                                        if let Some((_, p)) = self.cpus.get(r_i) {
+                                            if p.is_none() {
+                                                return Task::done(Message::Distpacher((
+                                                    r_i,
+                                                    (*pcb_id, *address, *size),
+                                                )))
+                                                .chain(Task::done(Message::Scheduler));
+                                            } else {
+                                                list[r_i] = 1;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    println!("======== 2 ========");
+                                    let r_i = rng.gen_range(0..self.config.cpu_quantity);
+                                    if self.counter % (self.quantum.unwrap() as u64) == 0 && self.counter != 0 {
+                                        return Task::done(Message::Distpacher((
+                                            r_i,
+                                            (*pcb_id, *address, *size),
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        Task::none()
+                    }
                     Some(Scheduler::HRRN) => Task::none(),
                     None => Task::none(),
                 }
@@ -361,6 +403,7 @@ impl Emulator {
                             let mut pcb = PCB::from(
                                 &self.memory.data[*old_address..*old_address + *old_size],
                             );
+                            println!("prev {:?}", &pcb);
                             pcb.ax = cpu.ax;
                             cpu.bx = pcb.bx;
                             pcb.cx = cpu.cx;
@@ -372,10 +415,10 @@ impl Emulator {
                             pcb.z = cpu.z;
 
                             pcb.process_state = ProcessState::Ready;
-
+                            println!("{:?}", &pcb);
                             // Save changes
                             let bytes: Vec<u8> = pcb.into();
-                            self.memory.data[*old_address..*old_address + *old_size]
+                            self.memory.data[*old_address..*old_address + bytes.len()]
                                 .copy_from_slice(&bytes[..]);
 
                             if let Some(timing) = self.diagram.iter_mut().find(|x| x.p_id == *p_id)
@@ -401,7 +444,7 @@ impl Emulator {
 
                     // Save changes
                     let bytes: Vec<u8> = pcb.into();
-                    self.memory.data[address..address + size].copy_from_slice(&bytes[..]);
+                    self.memory.data[address..address + bytes.len()].copy_from_slice(&bytes[..]);
 
                     // Inicia el conteo de tiempo para este proceso
                     cpu.start_time = Some(Instant::now());
@@ -831,6 +874,15 @@ impl Emulator {
                         cpu.pc += 6;
                     }
                 }
+
+                self.counter += 1;
+
+                if let Some(quantum) = self.quantum {
+                    if self.counter % (quantum as u64) == 0 && self.counter != 0 {
+                        println!("======== 3 ========");
+                        return Task::done(Message::Scheduler);
+                    }
+                }
                 Task::none()
             }
             Message::Input(mut input) => {
@@ -862,6 +914,9 @@ impl Emulator {
                     _ => {}
                 }
                 Task::none()
+            }
+            Message::TickScheduler => {
+                Task::done(Message::Tick).chain(Task::done(Message::Scheduler))
             }
         }
     }
@@ -935,7 +990,7 @@ impl Emulator {
                 Message::SchedulerSelected
             ),
             pick_list(
-                [1,2,3,4,5,6,7,],
+                [1, 2, 3, 4, 5, 6, 7,],
                 self.quantum,
                 Message::QuantumSelected
             ),
