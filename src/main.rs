@@ -31,6 +31,7 @@ struct Timing {
     burst: usize,                // Total burst time required
     arrival: u8,                 // Arrival time of the process
     start: Option<Instant>,      // Actual start time of the process
+    end_time: Option<Instant>,   // Time when process was terminated
     execution: Option<Duration>, // Time when process was last executed
     remaining_burst: usize,      // Remaining burst time (updated during execution)
 }
@@ -38,6 +39,7 @@ struct Timing {
 #[derive(Default)]
 struct Emulator {
     cpus: Vec<(CPU, Option<usize>)>,
+    stats_data: Vec<ProcessStats>,
     mode: Option<Mode>,
     memory: Memory,
     storage: Storage,
@@ -57,6 +59,15 @@ struct Emulator {
     counter: u64,
 }
 
+#[derive(Debug, Clone)]
+struct ProcessStats {
+    process_id: usize,
+    cpu_id: usize,
+    turnaround_time: f64,
+    execution_time: f64,
+    response_ratio: f64,
+    arrival_time: f64, 
+}
 #[derive(PartialEq)]
 enum Mode {
     Manual,
@@ -123,7 +134,8 @@ impl Emulator {
                 start_time: None,
                 total_start_time: None,
                 quantum: Some(1),
-                counter: 0,
+                counter: 0, 
+                stats_data: Vec::new(),
             },
             Task::none(),
         )
@@ -198,10 +210,18 @@ impl Emulator {
                 } else {
                     self.mode = Some(Mode::Manual);
                 }
-                // Registrar el tiempo cuando
-                if self.start_time.is_none() {
+                // Solo iniciar el tiempo total si no ha empezado
+                if self.total_start_time.is_none() {
                     self.total_start_time = Some(Instant::now());
+                    self.start_time = Some(Instant::now());
                     println!("Procesamiento iniciado.");
+                }
+
+                // Iniciar el tiempo de cada proceso en estado `Ready`
+                for timing in self.diagram.iter_mut() {
+                    if timing.start.is_none() && timing.c_id.is_none() {
+                        timing.start = Some(Instant::now());
+                    }
                 }
                 Task::none()
             }
@@ -232,6 +252,7 @@ impl Emulator {
                                     // Assign the process to free CPU
                                     if let Some((_, p)) = self.cpus.get(r_i) {
                                         if p.is_none() {
+                                        
                                             return Task::done(Message::Distpacher((
                                                 r_i,
                                                 (*pcb_id, *address, *size),
@@ -394,6 +415,7 @@ impl Emulator {
             }
             Message::Distpacher((cpu_index, (pcb_id, address, size))) => {
                 if let Some((cpu, p)) = self.cpus.get_mut(cpu_index) {
+                   
                     if let Some(p_id) = p {
                         // Context switch
                         // Store CPU content on the PCB
@@ -446,16 +468,21 @@ impl Emulator {
                     let bytes: Vec<u8> = pcb.into();
                     self.memory.data[address..address + bytes.len()].copy_from_slice(&bytes[..]);
 
-                    // Inicia el conteo de tiempo para este proceso
+                    // Inicia el temporizador del CPU y el tiempo individual del proceso si aún no ha comenzado
                     cpu.start_time = Some(Instant::now());
 
-                    // Mostrar mensaje en consola al iniciar el procesamiento de un proceso
-                    println!("Asignando proceso con ID: {} en CPU {}", pcb_id, cpu_index);
-                    // Updates times
                     if let Some(timing) = self.diagram.iter_mut().find(|x| x.p_id == pcb_id) {
                         timing.c_id = Some(cpu_index);
-                        timing.start = Some(Instant::now());
+                        if timing.start.is_none() {
+                            timing.start = Some(Instant::now());
+                        }
                     }
+
+                    // Updates times
+                    //if let Some(timing) = self.diagram.iter_mut().find(|x| x.p_id == pcb_id) {
+                        //timing.c_id = Some(cpu_index);
+                        //timing.start = Some(Instant::now());
+                    //}
 
                     if self.mode.is_none() {
                         self.mode = Some(Mode::Manual);
@@ -463,6 +490,10 @@ impl Emulator {
 
                     // Update the CPU running process id
                     *p = Some(pcb_id);
+
+                    // Mostrar mensaje en consola al iniciar el procesamiento de un proceso
+                    println!("Asignando proceso con ID: {} en CPU {}", pcb_id, cpu_index);
+                    
                 }
                 Task::none()
             }
@@ -481,19 +512,50 @@ impl Emulator {
                                 p_id, cpu_index
                             );
 
-                            // Calcular el tiempo transcurrido desde que se inició el proceso
+                        
                             if let Some(start_time) = cpu.start_time {
-                                let duration = start_time.elapsed();
-                                /*if let Some(timing) = self.diagram.iter_mut().find(|x| x.p_id == *p_id) {
-                                    timing.execution = Some(duration);
-                                }*/
-                                println!(
-                                    "Tiempo transcurrido para el proceso con ID: {}: {:.2?} segundos",
-                                    p_id, duration
-                                );
-                                cpu.start_time = None; // Limpiar el tiempo de inicio del proceso
-                            }
+                                let duration = start_time.elapsed(); // Calcula el tiempo de ejecución
+                                if let Some(timing) = self.diagram.iter_mut().find(|x| x.p_id == *p_id) {
+                                    timing.execution = Some(duration); // Asigna `duration` a `timing.execution
+                                    timing.end_time = Some(Instant::now());
+                
+                                    let arrival_time = timing.arrival as f64;
+                                    let turnaround_time = timing.end_time.unwrap().duration_since(timing.start.unwrap());
+                                    let execution_time = timing.execution.unwrap();
+                                    let response_ratio = turnaround_time.as_secs_f64() / execution_time.as_secs_f64();
 
+                                    // Almacena los datos de estadísticas en stats_data
+                                    self.stats_data.push(ProcessStats {
+                                        process_id: *p_id,
+                                        cpu_id: cpu_index,
+                                        arrival_time,
+                                        turnaround_time: turnaround_time.as_secs_f64(),
+                                        execution_time: execution_time.as_secs_f64(),
+                                        response_ratio,
+                                    });
+
+                                    // Calcula el tiempo de estancia (Turnaround Time) como tiempo final - tiempo de llegada
+                                    if let Some(turnaround_time) = timing.end_time.unwrap().checked_duration_since(timing.start.unwrap()) {
+                                        println!(
+                                            "Turnaround para el proceso {}: {:.2} segundos",
+                                            p_id, turnaround_time.as_secs_f64()
+                                        );
+                
+                                        // Calcula T_r / T_s si `execution` está definido
+                                        if let Some(execution_time) = timing.execution {
+                                            let response_ratio = turnaround_time.as_secs_f64() / execution_time.as_secs_f64();
+                                            println!(
+                                                "Tiempo de ejecución: {:.2} segundos, Tr / Ts: {:.2}",
+                                                execution_time.as_secs_f64(),
+                                                response_ratio
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            cpu.start_time = None; // Limpia el tiempo de inicio del proceso
+
+                            
                             // Update PCB
                             pcb.process_state = ProcessState::Terminated;
                             pcb.ax = cpu.ax;
@@ -528,12 +590,17 @@ impl Emulator {
 
                             // Verificar si todos los procesos han terminado
                             if self.cpus.iter().map(|x| x.1.is_none()).all(|x| x) {
-                                if let Some(total_start_time) = self.total_start_time {
-                                    let total_duration = total_start_time.elapsed();
-                                    println!("\n Análisis completo. Tiempo total del análisis: {:.2?} segundos", total_duration);
-                                    self.total_start_time = None;
-                                }
-                                self.mode = None;
+                                // Calcula el tiempo total acumulado sumando los tiempos de estancia de cada proceso
+                                let tiempo_total_acumulado: Duration = self.diagram.iter().filter_map(|timing| {
+                                    if let (Some(end_time), Some(start_time)) = (timing.end_time, timing.start) {
+                                        Some(end_time.duration_since(start_time))
+                                    } else {
+                                        None // Ignora procesos que no tienen tiempo de inicio o fin definido
+                                    }
+                                }).sum();
+
+                                // Imprime el tiempo total acumulado en segundos
+                                println!("Tiempo total: {:.2?} segundos", tiempo_total_acumulado.as_secs_f64());
                             }
                         }
                     }
@@ -874,12 +941,11 @@ impl Emulator {
                         cpu.pc += 6;
                     }
                 }
-
                 self.counter += 1;
 
                 if let Some(quantum) = self.quantum {
                     if self.counter % (quantum as u64) == 0 && self.counter != 0 {
-                        println!("======== 3 ========");
+                        //println!("======== 3 ========");
                         return Task::done(Message::Scheduler);
                     }
                 }
@@ -938,17 +1004,26 @@ impl Emulator {
         }
         if self.mode.is_some() {
             play_button = play_button.on_press(Message::ChangeMode);
+            
         }
         //Stats display
         if self.show_stats {
             let scheduler_text = match self.config.scheduler {
+                Some(Scheduler::RR) => rich_text([
+                    span("Método seleccionado es: "),
+                    span("Round Robin").size(22).color(color!(0x9E69E3)),
+                    span(format!(" (Quantum: {})", self.quantum.unwrap_or_default())).size(18).color(color!(0xFFD700)), // Muestra el quantum
+                ]),
                 Some(scheduler) => rich_text([
                     span("Método seleccionado es: "),
                     span(scheduler.to_string()).size(22).color(color!(0x9E69E3)),
                 ]),
                 None => rich_text([span("No hay método seleccionado.")]),
             };
-            let stats_view = column![
+        
+        
+            // Inicia la construcción del bloque de estadísticas
+            let mut stats_view = column![
                 container(text("Sección de Estadísticas del Sistema").size(30),)
                     .padding(10)
                     .style(container::rounded_box)
@@ -956,21 +1031,40 @@ impl Emulator {
                     .center_x(iced::Length::Fill),
                 widget::Space::with_height(iced::Length::Fixed(20.0)),
                 scheduler_text,
-                widget::Space::with_height(iced::Length::Fill),
-                row![
-                    widget::Space::with_width(iced::Length::Fill),
-                    button("Volver")
-                        .on_press(Message::StatsPressed)
-                        .width(iced::Length::Shrink),
-                ]
-            ]
-            .padding(20);
-
-            return container(stats_view)
+                widget::Space::with_height(iced::Length::Fixed(20.0)),
+            ];
+        
+            // Añade cada estadística individualmente en el `stats_view`
+            for stat in &self.stats_data {
+                stats_view = stats_view.push(column![
+                    text(format!("\nProceso con ID: {} en CPU {}", stat.process_id, stat.cpu_id)),
+                    text(format!("\n    Tiempo de llegada: {:.2} segundos", stat.arrival_time)),
+                    text(format!("\n    Turnaround {}: {:.2} segundos", stat.process_id, stat.turnaround_time)),
+                    text(format!("\n    Tiempo de ejecución: {:.2} segundos\n\n     Tr / Ts: {:.2}", stat.execution_time, stat.response_ratio)),
+                    widget::Space::with_height(iced::Length::Fixed(10.0)), // Espacio entre procesos
+                ]);
+            }
+        
+            // Suma el tiempo total de turnaround y añade al final del `stats_view`
+            let tiempo_total: f64 = self.stats_data.iter().map(|stat| stat.turnaround_time).sum();
+            stats_view = stats_view.push(text(format!("Tiempo total: {:.2} segundos", tiempo_total)));
+        
+            // Añade el botón para regresar
+            stats_view = stats_view.push(row![
+                widget::Space::with_width(iced::Length::Fill),
+                button("Volver")
+                    .on_press(Message::StatsPressed)
+                    .width(iced::Length::Shrink),
+            ]);
+        
+            // Retorna el `stats_view` dentro de un contenedor `scrollable`
+            return container(scrollable(stats_view))
                 .width(iced::Length::Fill)
                 .height(iced::Length::Fill)
                 .into();
         }
+        
+        
         // Menu bar
         let menu_bar = row![
             button("File").on_press(Message::OpenFile),
@@ -1365,6 +1459,7 @@ fn create_pcbs(
                     burst: num_instructions,
                     remaining_burst: num_instructions,
                     arrival: rand::thread_rng().gen_range(1..=5),
+                    start: None,
                     ..Default::default()
                 });
             }
